@@ -193,7 +193,9 @@ export async function tgSend(env: ShopEnv, t: any, text: string) {
   if (!env.TG_BOT_TOKEN || !tgOk(t)) return false;
   try {
     const r = await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: String(t.tg_chat), text: text.slice(0, 3900), disable_web_page_preview: true }), signal: AbortSignal.timeout(8000) });
-    return r.ok;
+    if (!r.ok) return false;
+    const j: any = await r.json().catch(() => ({}));
+    return (j?.result?.message_id as number) || true; // message_id για αντιστοίχιση reply → συζήτηση
   } catch { return false; }
 }
 export function turnText(t: any, x: { q: string; reply: string; country?: string; path?: string; sid: string; order?: boolean; lead?: boolean }) {

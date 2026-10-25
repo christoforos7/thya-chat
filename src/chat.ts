@@ -5,6 +5,7 @@ import { filterLinks } from './text.ts';
 import { notifyLead } from './notify.ts';
 import { answer, pickProvider } from './llm.ts';
 import { productInfo, productCards, stripCardLinks, detectOrder, ordersEnabled, lookupOrder, orderBlock, tgSend, turnText } from './shop.ts';
+import { humanActive, mapMsg, notesText } from './live.ts';
 
 const MAX_MSGS = 12, MAX_MSG_LEN = 1000, MAX_BODY = 20000;
 export const LIMITS = { perIpHour: 25, perIpDay: 80, leadsPerIpHour: 3, ordersPerIpHour: 6 };
@@ -57,6 +58,19 @@ export async function handleChat(req: Request, env: Env, t: any, headers: Record
   }
   await hit(env, 'c' + ipH, now);
 
+  // ---- ζωντανή συνομιλία: απαντά άνθρωπος από την ομάδα Telegram → η Naria σιωπά ----
+  if (await humanActive(env as any, t, sid, now).catch(() => false)) {
+    const at0 = nowIso(now); const cf0: any = (req as any).cf || {};
+    const p0 = (async () => {
+      await env.DB.prepare('INSERT INTO messages (tenant, sid, role, text, at) VALUES (?, ?, ?, ?, ?)').bind(t.id, sid, 'user', q, at0).run();
+      await env.DB.prepare('INSERT INTO convos (tenant, sid, started_at, last_at, ip_hash, country, path, lang, msgs, lead) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0) ON CONFLICT(tenant, sid) DO UPDATE SET last_at = excluded.last_at, msgs = msgs + 1').bind(t.id, sid, at0, at0, ipH.slice(0, 16), String(cf0.country || ''), clean(b.path, 200), clean(b.lang, 8)).run();
+      const id = await tgSend(env as any, t, `👤 #${sid.slice(0, 6)} · ζωντανά (κάντε reply για απάντηση)\n${q.slice(0, 1500)}`);
+      await mapMsg(env as any, t, typeof id === 'number' ? id : null, sid);
+    })().catch(() => {});
+    if (ctx) ctx.waitUntil(p0); else await p0;
+    return json({ reply: null, live: true }, 200, headers);
+  }
+
   // ---- παραγγελία (καταστήματα): αριθμός + email από τα τελευταία μηνύματα του επισκέπτη ----
   const userTexts = msgs.filter((m: any) => m.role === 'user').slice(-3).map((m: any) => m.content);
   const det = detectOrder(userTexts); const ordOn = ordersEnabled(env as any, t);
@@ -84,7 +98,7 @@ export async function handleChat(req: Request, env: Env, t: any, headers: Record
   // ---- γνώση + απάντηση ----
   const kb = await retrieve(env, t.id, msgs.filter((m: any) => m.role === 'user').slice(-2).map((m: any) => m.content).join('\n'));
   const prod = await productInfo(env as any, t, userTexts.slice(-2).join('\n')).catch(() => ({ text: '', rows: [] as any[] }));
-  const extra = [prod.text, orderBlock(ordOn, ord, det)].filter(Boolean).join('\n\n');
+  const extra = [await notesText(env as any, t).catch(() => ''), prod.text, orderBlock(ordOn, ord, det)].filter(Boolean).join('\n\n');
   const sys = systemPrompt(t, kb.chunks, env.BRAND_NAME || 'Thya') + (extra ? `\n\n${extra}` : '');
   const ans = await answer(env, t, sys, msgs, now);
   let reply = ans.text, tin = ans.tin, tout = ans.tout; const err = ans.err || '';
@@ -108,7 +122,7 @@ export async function handleChat(req: Request, env: Env, t: any, headers: Record
   };
   const p = log().catch(() => {}); if (ctx) ctx.waitUntil(p); else await p;
   // κάθε απάντηση στο κοινό κανάλι Telegram του πελάτη (αν έχει ρυθμιστεί)
-  const tg = tgSend(env as any, t, turnText(t, { q, reply, country: String(cf.country || ''), path: clean(b.path, 200), sid, order: !!det.number, lead: leadSaved })).catch(() => false);
+  const tg = tgSend(env as any, t, turnText(t, { q, reply, country: String(cf.country || ''), path: clean(b.path, 200), sid, order: !!det.number, lead: leadSaved })).then((id) => mapMsg(env as any, t, typeof id === 'number' ? id : null, sid)).catch(() => false);
   if (ctx) ctx.waitUntil(tg); else await tg;
   const cards = productCards(prod.rows, reply);
   return json({ reply: cards.length ? stripCardLinks(reply, cards) : reply, lead: leadSaved, products: cards }, 200, headers);

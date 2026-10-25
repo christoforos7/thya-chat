@@ -79,3 +79,10 @@ CREATE TABLE IF NOT EXISTS crawl_queue (tenant TEXT NOT NULL, url TEXT NOT NULL,
 -- Καταστήματα: αντίγραφο του δημόσιου καταλόγου (WooCommerce Store API), ανανέωση κάθε ώρα.
 CREATE TABLE IF NOT EXISTS shop_products (tenant TEXT NOT NULL, id INTEGER NOT NULL, name TEXT NOT NULL, url TEXT, price TEXT, sale INTEGER NOT NULL DEFAULT 0, in_stock INTEGER NOT NULL DEFAULT 1, cats TEXT, descr TEXT, image TEXT, updated TEXT NOT NULL, PRIMARY KEY (tenant, id));
 CREATE VIRTUAL TABLE IF NOT EXISTS shop_fts USING fts5(tenant UNINDEXED, pid UNINDEXED, body, tokenize = 'unicode61 remove_diacritics 2');
+
+-- Ζωντανή συνομιλία από Telegram και σημειώσεις /naria (src/live.ts)
+CREATE TABLE IF NOT EXISTS tg_map (tenant TEXT NOT NULL, chat TEXT NOT NULL, msg INTEGER NOT NULL, sid TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (chat, msg));
+CREATE TABLE IF NOT EXISTS live_msgs (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant TEXT NOT NULL, sid TEXT NOT NULL, text TEXT NOT NULL, at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_live ON live_msgs (tenant, sid, id);
+CREATE TABLE IF NOT EXISTS takeover (tenant TEXT NOT NULL, sid TEXT NOT NULL, until INTEGER NOT NULL, PRIMARY KEY (tenant, sid));
+CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant TEXT NOT NULL, text TEXT NOT NULL, at TEXT NOT NULL);

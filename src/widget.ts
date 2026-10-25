@@ -52,6 +52,7 @@ export const WIDGET_JS = String.raw`(() => {
       '.row{flex:none;display:flex;gap:8px;align-items:flex-end;max-width:92%;animation:pop .25s ease-out}.row.u{align-self:flex-end;flex-direction:row-reverse}.row img.mini{width:26px;height:26px;border-radius:50%;object-fit:cover;flex:none;border:1px solid #efe3cd}' +
       '.q,.a{padding:10px 13px;border-radius:18px;font-size:14px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word}' +
       '.q{background:' + c + ';color:#fff;border-bottom-right-radius:6px}.a{background:#fff;border:1px solid #efe3cd;border-bottom-left-radius:6px;box-shadow:0 2px 8px rgba(60,40,10,.05)}.a a{color:#8a6428;font-weight:600}.a strong{font-weight:700;color:#2b241c}' +
+      '.hm{display:flex;flex-direction:column;gap:3px}.hm small{font-size:10.5px;font-weight:700;color:#8a6428;letter-spacing:.3px;padding-left:4px}.a.hu{background:#fbf3e4;border-color:#e3cfa6}.nb{position:absolute;top:-2px;' + (left ? 'right' : 'left') + ':-2px;min-width:20px;height:20px;border-radius:99px;background:#c0392b;color:#fff;font-size:11px;font-weight:700;display:none;align-items:center;justify-content:center;border:2px solid #fff;padding:0 5px}.nb.on{display:flex}' +
       '.typing{display:flex;gap:4px;padding:13px 14px}.typing i{width:7px;height:7px;border-radius:50%;background:' + c + ';animation:dot 1.2s infinite}.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}' +
       // κάρτες προϊόντων
       '.cards{flex:none;display:flex;gap:10px;overflow-x:auto;padding:2px 2px 6px 34px;scroll-snap-type:x mandatory;animation:pop .3s ease-out}.cards::-webkit-scrollbar{height:4px}.cards::-webkit-scrollbar-thumb{background:#e6d6b8;border-radius:4px}' +
@@ -73,6 +74,11 @@ export const WIDGET_JS = String.raw`(() => {
     const add = (role, text) => {
       const b = el('div', { class: role === 'user' ? 'q' : 'a' }); b.append(role === 'user' ? text : rich(text));
       const r = el('div', { class: 'row' + (role === 'user' ? ' u' : '') }, role === 'user' ? null : img('mini'), b); msgs.append(r); scroll(); return r;
+    };
+    const addHuman = (text) => {
+      const i = String(text).indexOf(': '); const who = i > 0 && i < 40 ? String(text).slice(0, i) : ''; const body = i > 0 && i < 40 ? String(text).slice(i + 2) : String(text);
+      const b = el('div', { class: 'a hu' }); b.append(rich(body));
+      const r = el('div', { class: 'row' }, img('mini'), el('div', { class: 'hm' }, el('small', null, (who ? who + ' · ' : '') + (en ? 'THYA team' : 'ομάδα THYA')), b)); msgs.append(r); scroll(); return r;
     };
     const cards = (list) => {
       if (!Array.isArray(list) || !list.length) return;
@@ -97,10 +103,10 @@ export const WIDGET_JS = String.raw`(() => {
         const r = await fetch(API + '/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sid, messages: hist.slice(-12), path: location.pathname, lang: en ? 'en' : 'el' }) });
         const j = await r.json().catch(() => ({}));
         const ans = j.reply || (r.status === 429 ? (en ? 'Too many messages, please try again later.' : 'Πολλά μηνύματα, δοκιμάστε σε λίγο.') : L.err);
-        wait.remove(); add('assistant', ans); cards(j.products); if (j.reply) hist.push({ role: 'assistant', content: j.reply });
+        wait.remove(); if (j.live) { human = true; startPoll(); } else { add('assistant', ans); cards(j.products); if (j.reply) hist.push({ role: 'assistant', content: j.reply }); }
         ss.set('ic_hist_' + KEY, JSON.stringify(hist.slice(-12)));
       } catch (e) { wait.remove(); add('assistant', L.err); }
-      busy = false; inp.focus();
+      busy = false; inp.focus(); startPoll();
     }
     const fN = el('input', { placeholder: L.name, maxlength: '100' }), fE = el('input', { placeholder: L.email, type: 'email', maxlength: '200' }), fP = el('input', { placeholder: L.phone, type: 'tel', maxlength: '40' }), fT = el('textarea', { placeholder: L.note, rows: '2', maxlength: '1000' }), fC = el('input', { type: 'checkbox' });
     const lf = el('form', { class: 'lf', onsubmit: async (e) => { e.preventDefault(); if (!fC.checked) { fC.focus(); return; }
@@ -121,7 +127,35 @@ export const WIDGET_JS = String.raw`(() => {
     const btn = el('button', { class: 'b', type: 'button', 'aria-label': L.open, onclick: toggle });
     if (av) btn.append(el('img', { src: av, alt: '' }), el('span', { class: 'on-dot' }));
     else { const ic = el('span', { class: 'ic' }); ic.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'; btn.append(ic); }
-    if (hist.length) hist.forEach((m) => add(m.role, m.content)); else add('assistant', cfg.greeting || (en ? 'Hi! How can I help?' : 'Γεια σας! Πώς μπορώ να βοηθήσω;'));
+    const hello = () => { const h = new Date().getHours(); return en ? (h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening') : (h >= 4 && h < 12 ? 'Καλημέρα' : 'Καλησπέρα'); };
+    const greet = String(cfg.greeting || (en ? 'Hi! How can I help?' : 'Γεια σας! Πώς μπορώ να βοηθήσω;')).replace(/\{χαιρετισμός\}|\{greeting\}/g, hello());
+    if (hist.length) hist.forEach((m) => m.human ? addHuman(m.content) : add(m.role, m.content)); else add('assistant', greet);
+    const nb = el('span', { class: 'nb' }); btn.append(nb); let unread = 0;
+    // ζωντανή συνομιλία: νέα μηνύματα από την ομάδα (μόνο όταν ο επισκέπτης έχει γράψει, έως 30' αδράνειας)
+    let human = false, lastId = +(ss.get('ic_live_' + KEY) || 0) || 0, timer = null, lastAct = Date.now();
+    async function pollOnce() {
+      try {
+        const r = await fetch(API + '/poll?sid=' + encodeURIComponent(sid) + '&after=' + lastId, { cache: 'no-store' });
+        const j = await r.json().catch(() => null); if (!j) return;
+        human = !!j.human;
+        for (const m of j.msgs || []) {
+          lastId = Math.max(lastId, +m.id || 0); ss.set('ic_live_' + KEY, String(lastId)); lastAct = Date.now();
+          addHuman(m.text); hist.push({ role: 'assistant', content: m.text, human: true }); ss.set('ic_hist_' + KEY, JSON.stringify(hist.slice(-12)));
+          if (!panel.classList.contains('on')) { unread++; nb.textContent = String(unread); nb.classList.add('on'); }
+        }
+      } catch (e) {}
+    }
+    function startPoll() {
+      lastAct = Date.now(); if (timer) return;
+      const tick = async () => {
+        if (Date.now() - lastAct > 30 * 60_000) { timer = null; return; }
+        if (!document.hidden) await pollOnce();
+        timer = setTimeout(tick, panel.classList.contains('on') || human ? 3000 : 10000);
+      };
+      timer = setTimeout(tick, 1500);
+    }
+    btn.addEventListener('click', () => { unread = 0; nb.classList.remove('on'); });
+    if (hist.length) startPoll();
     root.append(panel, btn); document.body.append(host);
     // μήνυμα-πρόσκληση: μία φορά ανά επίσκεψη, μετά από 6''
     if (cfg.teaser && !ss.get('ic_tz_' + KEY) && !hist.length) setTimeout(() => {

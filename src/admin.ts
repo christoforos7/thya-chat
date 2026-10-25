@@ -9,13 +9,15 @@
 //   GET  /admin/usage?days=14                   χρήση ανά ημέρα (απαντήσεις, neurons)
 //   POST /admin/tenants/<id>/shop-sync          κατάλογος καταστήματος τώρα (WooCommerce Store API)
 //   POST /admin/tenants/<id>/tg-test            δοκιμαστικό μήνυμα στο κοινό κανάλι Telegram
-//   GET  /admin/tg-chats                        ομάδες που είδε πρόσφατα το bot (για το tg_chat)
+//   GET  /admin/tg-chats                        ομάδες που είδε πρόσφατα το bot (για το tg_chat· πριν το webhook)
+//   POST /admin/tg-webhook                      σύνδεση Telegram → Worker (ζωντανές απαντήσεις, /naria)
 //   Πεδία καταστήματος στο POST /admin/tenants: shop {type:'woocommerce', base:'https://...'}, tg_chat ('-100...')
 import { type Env, enqueueTenant, indexPage, crawlStep } from './kb.ts';
 import { json, safeEqual, clean, nowIso, normOrigin, randomId, sha256Hex, parseList } from './util.ts';
 import { chunkText } from './text.ts';
 import { monthSpend } from './llm.ts';
 import { ensureShop, syncCatalog, tgSend, tgChats, ordersEnabled } from './shop.ts';
+import { setupWebhook } from './live.ts';
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{1,30}$/;
 async function audit(env: Env, action: string, tenant: string | null, detail = '') {
@@ -41,6 +43,7 @@ export async function handleAdmin(req: Request, env: Env, path: string, publicUr
     return json({ neuron_cap: +(env.NEURON_CAP || 9000), claude_month_usd: await monthSpend(env), claude_cap_usd: +(env.CLAUDE_MONTHLY_USD || 30), rows });
   }
   if (seg[1] === 'tg-chats' && req.method === 'GET') return json(await tgChats(env as any));
+  if (seg[1] === 'tg-webhook' && req.method === 'POST') { const r = await setupWebhook(env as any, publicUrl); await audit(env, 'tg-webhook', null, JSON.stringify(r)); return json(r); }
   if (seg[1] !== 'tenants') return json({ error: 'not_found' }, 404);
 
   if (seg.length === 2 && req.method === 'GET') {

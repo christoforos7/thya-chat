@@ -10,6 +10,7 @@ import { handleChat, handleLead } from './chat.ts';
 import { handleAdmin } from './admin.ts';
 import { WIDGET_JS } from './widget.ts';
 import { asset } from './assets.ts';
+import { handleTelegram, poll } from './live.ts';
 import { ensureShop, syncCatalog } from './shop.ts';
 import { json, cors, originAllowed, parseList, parseObj, SEC_HEADERS, nowIso } from './util.ts';
 
@@ -47,6 +48,9 @@ export async function maintenance(env: Env, force = false) {
     await env.DB.prepare('DELETE FROM convos WHERE last_at < ?').bind(cut).run();
     await env.DB.prepare('DELETE FROM leads WHERE at < ?').bind(new Date(now - 365 * 86400_000).toISOString()).run();
     await env.DB.prepare("DELETE FROM usage_daily WHERE day < date('now', '-400 days')").run();
+    await env.DB.prepare('DELETE FROM tg_map WHERE at < ?').bind(new Date(now - 14 * 86400_000).toISOString()).run().catch(() => {});
+    await env.DB.prepare('DELETE FROM live_msgs WHERE at < ?').bind(cut).run().catch(() => {});
+    await env.DB.prepare('DELETE FROM takeover WHERE until < ?').bind(now - 86400_000).run().catch(() => {});
     await env.DB.prepare('INSERT INTO audit (at, actor, action, detail) VALUES (?, ?, ?, ?)').bind(nowIso(), 'maint', 'cleanup', cut).run().catch(() => {});
   }
   return true;
@@ -63,8 +67,9 @@ export default {
     if (p.startsWith('/a/') && req.method === 'GET') { const r = asset(p); if (r) return r; }
     if (p === '/' || p === '/health') return json({ ok: true, service: env.BRAND_NAME || 'Thya Chat' });
     if (p.startsWith('/admin/')) return handleAdmin(req, env, p, publicUrl);
+    if (p === '/tg/hook' && req.method === 'POST') return handleTelegram(req, env as any);
 
-    const m = p.match(/^\/v1\/t\/([^/]+)\/(config|chat|lead)$/);
+    const m = p.match(/^\/v1\/t\/([^/]+)\/(config|chat|lead|poll)$/);
     if (!m) return json({ error: 'not_found' }, 404);
     const t: any = await tenantByKey(env, m[1]);
     const origin = req.headers.get('origin');
@@ -77,6 +82,11 @@ export default {
       const pw = b.powered && typeof b.powered === 'object' ? b.powered : null;
       const powered = pw && typeof pw.name === 'string' && /^https:\/\/[^\s"'<>]{1,200}$/.test(String(pw.url || '')) ? { name: pw.name.slice(0, 50), url: pw.url } : null;
       return json({ ok: true, name: String(b.name || t.name).slice(0, 60), color: b.color, greeting: b.greeting, chips: Array.isArray(b.chips) ? b.chips.slice(0, 4).map((x: any) => String(x).slice(0, 60)) : [], position: b.position, privacy: typeof b.privacy === 'string' && /^https:\/\//.test(b.privacy) ? b.privacy : null, powered, avatar: typeof b.avatar === 'string' && /^(https:\/\/|\/a\/)[^\s"'<>]{1,300}$/.test(b.avatar) ? (b.avatar.startsWith('/') ? publicUrl + b.avatar : b.avatar) : null, teaser: typeof b.teaser === 'string' ? b.teaser.slice(0, 80) : null, subtitle: typeof b.subtitle === 'string' ? b.subtitle.slice(0, 60) : null }, 200, { ...h, 'cache-control': 'public, max-age=300' });
+    }
+    if (m[2] === 'poll' && req.method === 'GET') {
+      const sid = (url.searchParams.get('sid') || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 32);
+      if (!sid) return json({ msgs: [], human: false }, 200, h);
+      return json(await poll(env as any, t, sid, Math.max(0, +(url.searchParams.get('after') || 0) || 0)), 200, { ...h, 'cache-control': 'no-store' });
     }
     if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405, h);
     if (!/application\/json/i.test(req.headers.get('content-type') || '')) return json({ error: 'json_required' }, 415, h);

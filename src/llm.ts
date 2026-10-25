@@ -35,7 +35,7 @@ async function claude(env: Env, t: any, sys: string, msgs: { role: string; conte
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': env.ANTHROPIC_API_KEY as string, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: env.CLAUDE_MODEL || m.id, max_tokens: 450, system: sys, messages: msgs }),
+    body: JSON.stringify({ model: env.CLAUDE_MODEL || m.id, max_tokens: 2000, system: sys, messages: msgs }),
     signal: AbortSignal.timeout(20000),
   });
   if (!r.ok) { const t = await r.text().catch(() => ''); let m = ''; try { m = JSON.parse(t)?.error?.message || ''; } catch { m = t; } throw new Error(`claude_${r.status} ${String(m).slice(0, 90)}`); }

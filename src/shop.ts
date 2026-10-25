@@ -12,10 +12,10 @@ import { htmlToText } from './text.ts';
 export type ShopEnv = Env & { TG_BOT_TOKEN?: string; [k: string]: any };
 
 export const SHOP_SCHEMA = [
-  `CREATE TABLE IF NOT EXISTS shop_products (tenant TEXT NOT NULL, id INTEGER NOT NULL, name TEXT NOT NULL, url TEXT, price TEXT, sale INTEGER NOT NULL DEFAULT 0, in_stock INTEGER NOT NULL DEFAULT 1, cats TEXT, descr TEXT, updated TEXT NOT NULL, PRIMARY KEY (tenant, id))`,
+  `CREATE TABLE IF NOT EXISTS shop_products (tenant TEXT NOT NULL, id INTEGER NOT NULL, name TEXT NOT NULL, url TEXT, price TEXT, sale INTEGER NOT NULL DEFAULT 0, in_stock INTEGER NOT NULL DEFAULT 1, cats TEXT, descr TEXT, image TEXT, updated TEXT NOT NULL, PRIMARY KEY (tenant, id))`,
   `CREATE VIRTUAL TABLE IF NOT EXISTS shop_fts USING fts5(tenant UNINDEXED, pid UNINDEXED, body, tokenize = 'unicode61 remove_diacritics 2')`,
 ];
-const ALTERS = ['ALTER TABLE tenants ADD COLUMN shop TEXT', 'ALTER TABLE tenants ADD COLUMN tg_chat TEXT', 'ALTER TABLE tenants ADD COLUMN shop_synced TEXT'];
+const ALTERS = ['ALTER TABLE shop_products ADD COLUMN image TEXT', 'ALTER TABLE tenants ADD COLUMN shop TEXT', 'ALTER TABLE tenants ADD COLUMN tg_chat TEXT', 'ALTER TABLE tenants ADD COLUMN shop_synced TEXT'];
 let ready = false;
 export async function ensureShop(env: Env) {
   if (ready) return;
@@ -49,6 +49,7 @@ export function productRow(p: any) {
     sale: sale ? 1 : 0, in_stock: p.is_in_stock === false ? 0 : 1,
     cats: (Array.isArray(p.categories) ? p.categories : []).map((c: any) => clean(htmlToText(String(c?.name || '')), 60)).filter(Boolean).join(', '),
     descr: clean(htmlToText(String(p.short_description || p.description || '')), 300),
+    image: (() => { const im = Array.isArray(p.images) ? p.images[0] : null; const u = im && (im.thumbnail || im.src); return typeof u === 'string' && /^https:\/\//.test(u) ? u : null; })(),
   };
 }
 
@@ -68,7 +69,7 @@ export async function syncCatalog(env: ShopEnv, t: any, maxPages = 10) {
   const at = nowIso(); const db = env.DB;
   const stmts = [db.prepare('DELETE FROM shop_products WHERE tenant = ?').bind(t.id), db.prepare('DELETE FROM shop_fts WHERE tenant = ?').bind(t.id)];
   for (const x of rows) {
-    stmts.push(db.prepare('INSERT OR REPLACE INTO shop_products (tenant, id, name, url, price, sale, in_stock, cats, descr, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(t.id, x.id, x.name, x.url, x.price, x.sale, x.in_stock, x.cats, x.descr, at));
+    stmts.push(db.prepare('INSERT OR REPLACE INTO shop_products (tenant, id, name, url, price, sale, in_stock, cats, descr, image, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(t.id, x.id, x.name, x.url, x.price, x.sale, x.in_stock, x.cats, x.descr, x.image, at));
     stmts.push(db.prepare('INSERT INTO shop_fts (tenant, pid, body) VALUES (?, ?, ?)').bind(t.id, x.id, norm(`${x.name}\n${x.cats}\n${x.descr}`)));
   }
   stmts.push(db.prepare('UPDATE tenants SET shop_synced = ? WHERE id = ?').bind(at, t.id));
@@ -84,11 +85,12 @@ export const OFFER_RE = /προσφορ|εκπτωσ|εκπτωτ|κουπον|�
 const NEW_CAT_RE = /νεες αφιξεισ|new in|νεα/;
 
 // Τα πιο σχετικά προϊόντα για την ερώτηση + οι κατηγορίες, ως κείμενο για τον βοηθό.
-export async function productContext(env: ShopEnv, t: any, query: string, k = 8) {
-  if (!shopCfg(t)) return '';
+export async function productContext(env: ShopEnv, t: any, query: string, k = 8) { return (await productInfo(env, t, query, k)).text; }
+export async function productInfo(env: ShopEnv, t: any, query: string, k = 8): Promise<{ text: string; rows: any[] }> {
+  if (!shopCfg(t)) return { text: '', rows: [] };
   await ensureShop(env);
   const n = (await env.DB.prepare('SELECT COUNT(*) AS n FROM shop_products WHERE tenant = ?').bind(t.id).first())?.n || 0;
-  if (!n) return '';
+  if (!n) return { text: '', rows: [] };
   const cats = (await env.DB.prepare('SELECT cats FROM shop_products WHERE tenant = ? AND cats IS NOT NULL').bind(t.id).all()).results || [];
   const catSet = [...new Set(cats.flatMap((c: any) => String(c.cats).split(', ')).filter(Boolean))].slice(0, 30);
   const head = `ΚΑΤΑΣΤΗΜΑ: ${n} προϊόντα. Κατηγορίες: ${catSet.join(', ') || '—'}.`;
@@ -97,16 +99,16 @@ export async function productContext(env: ShopEnv, t: any, query: string, k = 8)
   if (OFFER_RE.test(q)) {
     const sale: any[] = (await env.DB.prepare('SELECT * FROM shop_products WHERE tenant = ? AND sale = 1 AND in_stock = 1 ORDER BY updated DESC LIMIT ?').bind(t.id, k).all()).results || [];
     if (sale.length) {
-      return [head, `ΠΡΟΪΟΝΤΑ ΣΕ ΠΡΟΣΦΟΡΑ ΤΩΡΑ (μετράνε ως ΠΗΓΕΣ):\n${sale.map(fmt).join('\n')}`,
-        'ΠΡΟΣΦΟΡΕΣ: παρουσίασε με ενθουσιασμό 2–3 από αυτά με την τιμή προσφοράς, την αρχική τιμή και τον σύνδεσμο. Ρώτα αν ψάχνει κάτι συγκεκριμένο ή για δώρο.'].join('\n');
+      return { rows: sale, text: [head, `ΠΡΟΪΟΝΤΑ ΣΕ ΠΡΟΣΦΟΡΑ ΤΩΡΑ (μετράνε ως ΠΗΓΕΣ):\n${sale.map(fmt).join('\n')}`,
+        'ΠΡΟΣΦΟΡΕΣ: παρουσίασε με ενθουσιασμό 2–3 από αυτά με την τιμή προσφοράς, την αρχική τιμή και τον σύνδεσμο. Ρώτα αν ψάχνει κάτι συγκεκριμένο ή για δώρο.'].join('\n') };
     }
     const all: any[] = (await env.DB.prepare('SELECT * FROM shop_products WHERE tenant = ? AND in_stock = 1 ORDER BY updated DESC').bind(t.id).all()).results || [];
     const fresh = all.filter((x) => NEW_CAT_RE.test(norm(x.cats || ''))).slice(0, 4);
     const pick = (fresh.length ? fresh : all.slice(0, 4));
-    return [head, `ΝΕΕΣ ΑΦΙΞΕΙΣ / ΠΡΟΤΑΣΕΙΣ (μετράνε ως ΠΗΓΕΣ):\n${pick.map(fmt).join('\n')}`,
+    return { rows: pick, text: [head, `ΝΕΕΣ ΑΦΙΞΕΙΣ / ΠΡΟΤΑΣΕΙΣ (μετράνε ως ΠΗΓΕΣ):\n${pick.map(fmt).join('\n')}`,
       'ΠΡΟΣΦΟΡΕΣ — ΑΥΤΗ ΤΗ ΣΤΙΓΜΗ δεν τρέχει έκπτωση σε προϊόντα. Απάντησε σαν το ίδιο το κατάστημα (α΄ πληθυντικός: «αυτή τη στιγμή δεν έχουμε…»), ζεστά και με σιγουριά, σε 2–4 σύντομες προτάσεις:',
       '1) πες απλά ότι αυτή την περίοδο δεν τρέχει κάποια έκπτωση· 2) θύμισε τα σταθερά πλεονεκτήματα (π.χ. δωρεάν αποστολή, Gift Card αν υπάρχει στις κατηγορίες)· 3) πρότεινε 1–2 από τις ΝΕΕΣ ΑΦΙΞΕΙΣ με τιμή και σύνδεσμο· 4) πρότεινε να αφήσει το email του για να ενημερωθεί πρώτος/πρώτη για την επόμενη προσφορά.',
-      'ΑΠΑΓΟΡΕΥΕΤΑΙ στις προσφορές: «δεν έχω στοιχεία», «δεν γνωρίζω», «δεν θέλω να σας δώσω λάθος πληροφορία», παραπομπή σε τηλέφωνο για προσφορές, ή επινόηση έκπτωσης/κουπονιού.'].join('\n');
+      'ΑΠΑΓΟΡΕΥΕΤΑΙ στις προσφορές: «δεν έχω στοιχεία», «δεν γνωρίζω», «δεν θέλω να σας δώσω λάθος πληροφορία», παραπομπή σε τηλέφωνο για προσφορές, ή επινόηση έκπτωσης/κουπονιού.'].join('\n') };
   }
 
   const fq = ftsQuery(query);
@@ -117,11 +119,23 @@ export async function productContext(env: ShopEnv, t: any, query: string, k = 8)
   if (!rows.length && /δωρ|gift|νε[αο]|new/.test(q)) {
     rows = (await env.DB.prepare('SELECT * FROM shop_products WHERE tenant = ? AND in_stock = 1 ORDER BY sale DESC, updated DESC LIMIT ?').bind(t.id, k).all()).results || [];
   }
-  return [
+  return { rows, text: [
     head,
     rows.length ? `ΣΧΕΤΙΚΑ ΠΡΟΪΟΝΤΑ (τρέχουσες τιμές και διαθεσιμότητα· μετράνε ως ΠΗΓΕΣ):\n${rows.map(fmt).join('\n')}` : 'ΣΧΕΤΙΚΑ ΠΡΟΪΟΝΤΑ: κανένα δεν ταιριάζει ακριβώς — ρώτα τι ψάχνει (είδος, υλικό, χρώμα, για δώρο σε ποιον, προϋπολογισμό) ή πρότεινε κατηγορία.',
     'ΠΡΟΤΑΣΕΙΣ ΠΡΟΪΟΝΤΩΝ: πρότεινε 1–3 προϊόντα από τα ΣΧΕΤΙΚΑ ΠΡΟΪΟΝΤΑ με τον σύνδεσμό τους, όνομα και τιμή όπως είναι γραμμένα. Μην προτείνεις εξαντλημένα, εκτός αν ρωτήσει για αυτά. Ποτέ προϊόν, τιμή ή έκπτωση που δεν υπάρχει εδώ.',
-  ].join('\n');
+  ].join('\n') };
+}
+
+// Κάρτες για το widget: τα προϊόντα (από όσα είδε ο βοηθός) που αναφέρει η απάντηση, με φωτογραφία και τιμή.
+export function productCards(rows: any[], reply: string, max = 3) {
+  const r = norm(reply); const out: any[] = []; const seen = new Set<number>();
+  for (const x of rows) {
+    if (out.length >= max || seen.has(x.id) || !x.url) continue;
+    const byUrl = reply.includes(x.url) || (() => { try { return reply.includes(decodeURI(x.url)); } catch { return false; } })();
+    const byName = x.name && x.name.length >= 4 && r.includes(norm(x.name));
+    if (byUrl || byName) { seen.add(x.id); out.push({ name: x.name, price: x.price || '', url: x.url, image: x.image || null, in_stock: !!x.in_stock }); }
+  }
+  return out;
 }
 
 // ---------------- παραγγελίες ----------------

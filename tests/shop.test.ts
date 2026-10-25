@@ -119,3 +119,15 @@ test('προσφορές χωρίς εκπτώσεις: σίγουρη απάν�
   assert.match(sys, /ΝΕΕΣ ΑΦΙΞΕΙΣ[\s\S]*Aira Silver/);
   assert.match(sys, /ΑΠΑΓΟΡΕΥΕΤΑΙ στις προσφορές/);
 });
+
+test('κάρτες προϊόντων με φωτογραφία στην απάντηση· avatar από τον Worker', async () => {
+  CATALOG.splice(0, CATALOG.length, P(1, 'Aira Silver ασημένιο δαχτυλίδι', '2100', { images: [{ thumbnail: `${BASE}/img/aira.jpg` }] }), P(3, 'Luna χρυσό κολιέ', '4900', { cat: 'Κολιέ' }));
+  const key = await setup();
+  const j: any = await (await chat(key, ['ψάχνω ασημένιο δαχτυλίδι'])).json();
+  assert.equal(j.products.length, 1); assert.equal(j.products[0].image, `${BASE}/img/aira.jpg`); assert.match(j.products[0].price, /21,00/);
+  const a = await call('/a/naria.webp'); assert.equal(a.status, 200); assert.equal(a.headers.get('content-type'), 'image/webp');
+  await admin('/admin/tenants', { id: 'shop', brand: { name: 'Naria', avatar: '/a/naria.webp', teaser: 'Ψάχνετε δώρο;' } });
+  const cfg: any = await (await call(`/v1/t/${key}/config`, { headers: { origin: BASE } })).json();
+  assert.equal(cfg.avatar, 'https://chat.test/a/naria.webp'); assert.equal(cfg.teaser, 'Ψάχνετε δώρο;');
+  assert.equal((await call('/w-next.js')).status, 200);
+});

@@ -77,5 +77,5 @@ CREATE TABLE IF NOT EXISTS audit (
 CREATE TABLE IF NOT EXISTS crawl_queue (tenant TEXT NOT NULL, url TEXT NOT NULL, added_at TEXT NOT NULL, tries INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (tenant, url));
 
 -- Καταστήματα: αντίγραφο του δημόσιου καταλόγου (WooCommerce Store API), ανανέωση κάθε ώρα.
-CREATE TABLE IF NOT EXISTS shop_products (tenant TEXT NOT NULL, id INTEGER NOT NULL, name TEXT NOT NULL, url TEXT, price TEXT, sale INTEGER NOT NULL DEFAULT 0, in_stock INTEGER NOT NULL DEFAULT 1, cats TEXT, descr TEXT, updated TEXT NOT NULL, PRIMARY KEY (tenant, id));
+CREATE TABLE IF NOT EXISTS shop_products (tenant TEXT NOT NULL, id INTEGER NOT NULL, name TEXT NOT NULL, url TEXT, price TEXT, sale INTEGER NOT NULL DEFAULT 0, in_stock INTEGER NOT NULL DEFAULT 1, cats TEXT, descr TEXT, image TEXT, updated TEXT NOT NULL, PRIMARY KEY (tenant, id));
 CREATE VIRTUAL TABLE IF NOT EXISTS shop_fts USING fts5(tenant UNINDEXED, pid UNINDEXED, body, tokenize = 'unicode61 remove_diacritics 2');

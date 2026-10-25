@@ -4,7 +4,7 @@ import { clean, json, nowIso, day, sha256Hex, parseList, parseObj, findContact }
 import { filterLinks } from './text.ts';
 import { notifyLead } from './notify.ts';
 import { answer, pickProvider } from './llm.ts';
-import { productContext, detectOrder, ordersEnabled, lookupOrder, orderBlock, tgSend, turnText } from './shop.ts';
+import { productInfo, productCards, detectOrder, ordersEnabled, lookupOrder, orderBlock, tgSend, turnText } from './shop.ts';
 
 const MAX_MSGS = 12, MAX_MSG_LEN = 1000, MAX_BODY = 20000;
 export const LIMITS = { perIpHour: 25, perIpDay: 80, leadsPerIpHour: 3, ordersPerIpHour: 6 };
@@ -83,7 +83,8 @@ export async function handleChat(req: Request, env: Env, t: any, headers: Record
 
   // ---- γνώση + απάντηση ----
   const kb = await retrieve(env, t.id, msgs.filter((m: any) => m.role === 'user').slice(-2).map((m: any) => m.content).join('\n'));
-  const extra = [await productContext(env as any, t, userTexts.slice(-2).join('\n')).catch(() => ''), orderBlock(ordOn, ord, det)].filter(Boolean).join('\n\n');
+  const prod = await productInfo(env as any, t, userTexts.slice(-2).join('\n')).catch(() => ({ text: '', rows: [] as any[] }));
+  const extra = [prod.text, orderBlock(ordOn, ord, det)].filter(Boolean).join('\n\n');
   const sys = systemPrompt(t, kb.chunks, env.BRAND_NAME || 'Thya') + (extra ? `\n\n${extra}` : '');
   const ans = await answer(env, t, sys, msgs, now);
   let reply = ans.text, tin = ans.tin, tout = ans.tout; const err = ans.err || '';
@@ -109,7 +110,7 @@ export async function handleChat(req: Request, env: Env, t: any, headers: Record
   // κάθε απάντηση στο κοινό κανάλι Telegram του πελάτη (αν έχει ρυθμιστεί)
   const tg = tgSend(env as any, t, turnText(t, { q, reply, country: String(cf.country || ''), path: clean(b.path, 200), sid, order: !!det.number, lead: leadSaved })).catch(() => false);
   if (ctx) ctx.waitUntil(tg); else await tg;
-  return json({ reply, lead: leadSaved }, 200, headers);
+  return json({ reply, lead: leadSaved, products: productCards(prod.rows, reply) }, 200, headers);
 }
 
 // Φόρμα «Αφήστε τα στοιχεία σας» του widget (με ρητή συγκατάθεση).

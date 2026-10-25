@@ -171,5 +171,8 @@ export async function tgChats(env: ShopEnv) {
   const j: any = await r.json().catch(() => ({}));
   const seen = new Map<string, any>();
   for (const u of j.result || []) { const c = u.message?.chat || u.my_chat_member?.chat || u.channel_post?.chat; if (c?.id) seen.set(String(c.id), { id: String(c.id), type: c.type, title: c.title || [c.first_name, c.last_name].filter(Boolean).join(' ') }); }
-  return { chats: [...seen.values()] };
+  let bot: any = null; let hook: any = null;
+  try { const m: any = await (await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/getMe`, { signal: AbortSignal.timeout(8000) })).json(); bot = m.ok ? { username: m.result?.username, name: m.result?.first_name } : { error: m.description || 'getMe_failed' }; } catch { bot = { error: 'getMe_unreachable' }; }
+  try { const w: any = await (await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/getWebhookInfo`, { signal: AbortSignal.timeout(8000) })).json(); hook = { webhook_set: !!w.result?.url, pending: w.result?.pending_update_count ?? null }; } catch { hook = null; }
+  return { chats: [...seen.values()], updates_ok: j.ok === true, telegram_error: j.ok === false ? String(j.description || '').slice(0, 120) : null, bot, ...(hook || {}) };
 }

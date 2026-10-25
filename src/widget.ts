@@ -52,7 +52,7 @@ export const WIDGET_JS = String.raw`(() => {
       '.row{flex:none;display:flex;gap:8px;align-items:flex-end;max-width:92%;animation:pop .25s ease-out}.row.u{align-self:flex-end;flex-direction:row-reverse}.row img.mini{width:26px;height:26px;border-radius:50%;object-fit:cover;flex:none;border:1px solid #efe3cd}' +
       '.q,.a{padding:10px 13px;border-radius:18px;font-size:14px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word}' +
       '.q{background:' + c + ';color:#fff;border-bottom-right-radius:6px}.a{background:#fff;border:1px solid #efe3cd;border-bottom-left-radius:6px;box-shadow:0 2px 8px rgba(60,40,10,.05)}.a a{color:#8a6428;font-weight:600}.a strong{font-weight:700;color:#2b241c}' +
-      '.hm{display:flex;flex-direction:column;gap:3px}.hm small{font-size:10.5px;font-weight:700;color:#8a6428;letter-spacing:.3px;padding-left:4px}.a.hu{background:#fbf3e4;border-color:#e3cfa6}.nb{position:absolute;top:-2px;' + (left ? 'right' : 'left') + ':-2px;min-width:20px;height:20px;border-radius:99px;background:#c0392b;color:#fff;font-size:11px;font-weight:700;display:none;align-items:center;justify-content:center;border:2px solid #fff;padding:0 5px}.nb.on{display:flex}' +
+      '.row img.mini.hp{width:30px;height:30px;border:2px solid ' + c + '}.hm{display:flex;flex-direction:column;gap:3px}.hm small{font-size:10.5px;font-weight:700;color:#8a6428;letter-spacing:.3px;padding-left:4px}.a.hu{background:#fbf3e4;border-color:#e3cfa6}.nb{position:absolute;top:-2px;' + (left ? 'right' : 'left') + ':-2px;min-width:20px;height:20px;border-radius:99px;background:#c0392b;color:#fff;font-size:11px;font-weight:700;display:none;align-items:center;justify-content:center;border:2px solid #fff;padding:0 5px}.nb.on{display:flex}' +
       '.typing{display:flex;gap:4px;padding:13px 14px}.typing i{width:7px;height:7px;border-radius:50%;background:' + c + ';animation:dot 1.2s infinite}.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}' +
       // κάρτες προϊόντων
       '.cards{flex:none;display:flex;gap:10px;overflow-x:auto;padding:2px 2px 6px 34px;scroll-snap-type:x mandatory;animation:pop .3s ease-out}.cards::-webkit-scrollbar{height:4px}.cards::-webkit-scrollbar-thumb{background:#e6d6b8;border-radius:4px}' +
@@ -75,10 +75,17 @@ export const WIDGET_JS = String.raw`(() => {
       const b = el('div', { class: role === 'user' ? 'q' : 'a' }); b.append(role === 'user' ? text : rich(text));
       const r = el('div', { class: 'row' + (role === 'user' ? ' u' : '') }, role === 'user' ? null : img('mini'), b); msgs.append(r); scroll(); return r;
     };
+    // μέλος της ομάδας από το όνομα του Telegram (χωρίς τόνους/πεζά-κεφαλαία)
+    const nrm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ς/g, 'σ').trim();
+    const member = (who) => { const k = nrm(who); return (cfg.team || []).find((m) => (m.names || []).some((n) => nrm(n) === k)) || null; };
+    const teamLabel = en ? 'THYA team' : 'ομάδα THYA';
     const addHuman = (text) => {
       const i = String(text).indexOf(': '); const who = i > 0 && i < 40 ? String(text).slice(0, i) : ''; const body = i > 0 && i < 40 ? String(text).slice(i + 2) : String(text);
+      const m = member(who); const name = (m && m.display) || who; const pic = m && safe(m.avatar);
       const b = el('div', { class: 'a hu' }); b.append(rich(body));
-      const r = el('div', { class: 'row' }, img('mini'), el('div', { class: 'hm' }, el('small', null, (who ? who + ' · ' : '') + (en ? 'THYA team' : 'ομάδα THYA')), b)); msgs.append(r); scroll(); return r;
+      const r = el('div', { class: 'row' }, pic ? el('img', { class: 'mini hp', src: pic, alt: '' }) : img('mini'), el('div', { class: 'hm' }, el('small', null, (name ? name + ' · ' : '') + teamLabel), b)); msgs.append(r); scroll();
+      setHead(m ? { name: name, pic: pic } : (name ? { name: name, pic: null } : null));
+      return r;
     };
     const cards = (list) => {
       if (!Array.isArray(list) || !list.length) return;
@@ -114,9 +121,15 @@ export const WIDGET_JS = String.raw`(() => {
       fN, fE, fP, fT, el('label', null, fC, L.consent), el('button', { class: 'sb', type: 'submit' }, L.submit));
     const sendBtn = el('button', { class: 's', type: 'submit', 'aria-label': L.send }); sendBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
     const close = () => panel.classList.remove('on');
+    // κεφαλίδα: Naria ή το μέλος της ομάδας που μιλά ζωντανά
+    const headImg = img(); const headName = el('b', null, cfg.name); const headSub = el('small', null, cfg.subtitle || L.ai);
+    const setHead = (p) => {
+      if (p && p.name) { if (headImg && p.pic) headImg.src = p.pic; headName.textContent = p.name; headSub.textContent = (en ? 'Connected now · ' : 'Συνδέθηκε τώρα · ') + teamLabel; }
+      else { if (headImg && av) headImg.src = av; headName.textContent = cfg.name; headSub.textContent = cfg.subtitle || L.ai; }
+    };
     const panel = el('div', { class: 'p', role: 'dialog', 'aria-label': cfg.name },
-      el('div', { class: 'h' }, av ? el('div', { class: 'av' }, img(), el('span', { class: 'on-dot' })) : null,
-        el('div', { class: 'hn' }, el('b', null, cfg.name), el('small', null, cfg.subtitle || L.ai)),
+      el('div', { class: 'h' }, av ? el('div', { class: 'av' }, headImg, el('span', { class: 'on-dot' })) : null,
+        el('div', { class: 'hn' }, headName, headSub),
         el('button', { class: 'x', type: 'button', 'aria-label': L.close, onclick: close }, '×')),
       msgs, chips, el('button', { class: 'lv', type: 'button', onclick: () => lf.classList.toggle('on') }, L.leave), lf,
       el('form', { class: 'f', onsubmit: (e) => { e.preventDefault(); send(); } }, inp, sendBtn),
@@ -143,6 +156,7 @@ export const WIDGET_JS = String.raw`(() => {
           addHuman(m.text); hist.push({ role: 'assistant', content: m.text, human: true }); ss.set('ic_hist_' + KEY, JSON.stringify(hist.slice(-12)));
           if (!panel.classList.contains('on')) { unread++; nb.textContent = String(unread); nb.classList.add('on'); }
         }
+        if (!human) setHead(null);
       } catch (e) {}
     }
     function startPoll() {

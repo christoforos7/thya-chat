@@ -96,3 +96,11 @@ test('σύνδεση webhook από τη διαχείριση', async () => {
   const sw = tg.find((x) => x.method === 'setWebhook'); assert.equal(sw.body.secret_token, await hookSecret(env));
   assert.ok(tg.some((x) => x.method === 'setMyCommands'));
 });
+
+test('ομάδα: η φωτογραφία της Kelly σερβίρεται και περνά στις ρυθμίσεις του widget', async () => {
+  const key = await setup();
+  await admin('/admin/tenants', { id: 'shop', brand: { name: 'Naria', team: [{ names: ['Kelly', 'Κέλλυ'], display: 'Kelly', avatar: '/a/kelly.webp' }] } });
+  const cfg: any = await (await call(`/v1/t/${key}/config`, { headers: { origin: SITE } })).json();
+  assert.deepEqual(cfg.team, [{ names: ['Kelly', 'Κέλλυ'], display: 'Kelly', avatar: 'https://chat.test/a/kelly.webp' }]);
+  const a = await call('/a/kelly.webp'); assert.equal(a.status, 200);
+});

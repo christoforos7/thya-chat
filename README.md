@@ -1,4 +1,4 @@
-# Thya Chat — AI βοηθός του thya.gr
+# Naria — AI βοηθός του thya.gr
 
 Αυτόνομο project, μόνο για το κατάστημα κοσμημάτων **thya.gr**: δικός του Worker, δική του βάση D1, δικό του bot Telegram.
 

@@ -74,7 +74,8 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: { ...h, ...SEC_HEADERS } });
     if (m[2] === 'config' && req.method === 'GET') {
       const b = parseObj(t.brand);
-      const powered = b.powered === true && env.BRAND_URL ? { name: env.BRAND_NAME || 'Thya', url: env.BRAND_URL } : null;
+      const pw = b.powered && typeof b.powered === 'object' ? b.powered : null;
+      const powered = pw && typeof pw.name === 'string' && /^https:\/\/[^\s"'<>]{1,200}$/.test(String(pw.url || '')) ? { name: pw.name.slice(0, 50), url: pw.url } : null;
       return json({ ok: true, name: String(b.name || t.name).slice(0, 60), color: b.color, greeting: b.greeting, chips: Array.isArray(b.chips) ? b.chips.slice(0, 4).map((x: any) => String(x).slice(0, 60)) : [], position: b.position, privacy: typeof b.privacy === 'string' && /^https:\/\//.test(b.privacy) ? b.privacy : null, powered, avatar: typeof b.avatar === 'string' && /^(https:\/\/|\/a\/)[^\s"'<>]{1,300}$/.test(b.avatar) ? (b.avatar.startsWith('/') ? publicUrl + b.avatar : b.avatar) : null, teaser: typeof b.teaser === 'string' ? b.teaser.slice(0, 80) : null, subtitle: typeof b.subtitle === 'string' ? b.subtitle.slice(0, 60) : null }, 200, { ...h, 'cache-control': 'public, max-age=300' });
     }
     if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405, h);

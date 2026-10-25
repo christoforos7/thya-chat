@@ -10,8 +10,8 @@ export const WIDGET_JS = String.raw`(() => {
   const BASE = new URL(me.src).origin;
   const API = BASE + '/v1/t/' + KEY;
   const en = /^en/i.test(document.documentElement.lang || navigator.language || '');
-  const L = en ? { open: 'Chat with us', ph: 'Type your message…', send: 'Send', leave: 'Leave your details', name: 'Name', email: 'Email', phone: 'Phone', note: 'How can we help?', consent: 'I agree to be contacted about my request.', submit: 'Send details', thanks: 'Thank you! We will contact you soon.', err: 'Something went wrong. Please try again.', ai: 'AI assistant · may make mistakes', close: 'Close', view: 'View', out: 'Out of stock', dismiss: 'Dismiss' }
-                 : { open: 'Συνομιλία', ph: 'Γράψτε το μήνυμά σας…', send: 'Αποστολή', leave: 'Αφήστε τα στοιχεία σας', name: 'Όνομα', email: 'Email', phone: 'Τηλέφωνο', note: 'Πώς μπορούμε να βοηθήσουμε;', consent: 'Συμφωνώ να επικοινωνήσετε μαζί μου για το αίτημά μου.', submit: 'Αποστολή στοιχείων', thanks: 'Ευχαριστούμε! Θα επικοινωνήσουμε σύντομα.', err: 'Κάτι πήγε στραβά. Δοκιμάστε ξανά.', ai: 'AI βοηθός · μπορεί να κάνει λάθη', close: 'Κλείσιμο', view: 'Δες το', out: 'Εξαντλημένο', dismiss: 'Κλείσιμο' };
+  const L = en ? { open: 'Chat with us', ph: 'Type your message…', send: 'Send', leave: 'Leave your details', name: 'Name', email: 'Email', phone: 'Phone', note: 'How can we help?', consent: 'I agree to be contacted about my request.', submit: 'Send details', thanks: 'Thank you! We will contact you soon.', err: 'Something went wrong. Please try again.', ai: 'AI assistant', close: 'Close', view: 'View', out: 'Out of stock', dismiss: 'Dismiss' }
+                 : { open: 'Συνομιλία', ph: 'Γράψτε το μήνυμά σας…', send: 'Αποστολή', leave: 'Αφήστε τα στοιχεία σας', name: 'Όνομα', email: 'Email', phone: 'Τηλέφωνο', note: 'Πώς μπορούμε να βοηθήσουμε;', consent: 'Συμφωνώ να επικοινωνήσετε μαζί μου για το αίτημά μου.', submit: 'Αποστολή στοιχείων', thanks: 'Ευχαριστούμε! Θα επικοινωνήσουμε σύντομα.', err: 'Κάτι πήγε στραβά. Δοκιμάστε ξανά.', ai: 'AI βοηθός', close: 'Κλείσιμο', view: 'Δες το', out: 'Εξαντλημένο', dismiss: 'Κλείσιμο' };
   const ss = { get(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { sessionStorage.setItem(k, v); } catch (e) {} } };
   let sid = ss.get('ic_sid'); if (!sid) { sid = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join(''); ss.set('ic_sid', sid); }
   let hist = []; try { hist = JSON.parse(ss.get('ic_hist_' + KEY) || '[]'); } catch (e) {}
@@ -61,7 +61,7 @@ export const WIDGET_JS = String.raw`(() => {
       '.f{display:flex;gap:8px;padding:10px 12px;border-top:1px solid #efe3cd;background:#fff;align-items:center}.f input{flex:1;border:1px solid #e6d8bf;border-radius:99px;padding:11px 16px;font-size:16px;outline:none;background:#fffdf9;color:#2b241c}.f input:focus{border-color:' + c + ';box-shadow:0 0 0 3px ' + c + '22}' +
       '.s{border:0;background:' + c + ';color:#fff;border-radius:99px;width:42px;height:42px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none}.s svg{width:18px;height:18px}' +
       '.lv{background:none;border:0;color:#8a6428;font-size:12px;font-weight:600;cursor:pointer;padding:2px 16px 8px;text-align:left}' +
-      '.ft{font-size:10.5px;color:#a3957f;padding:6px 16px 9px;display:flex;justify-content:space-between;gap:8px;background:#fff}.ft a{color:#a3957f}' +
+      '.ft{font-size:10.5px;color:#a3957f;padding:6px 16px 9px;display:flex;justify-content:space-between;align-items:center;gap:8px;background:#fff}.ft a{color:#a3957f}.ft .pw{text-decoration:none;font-weight:600;letter-spacing:.2px}.ft .pw:hover{color:#8a6428}' +
       '.lf{display:none;flex-direction:column;gap:8px;padding:12px 14px;border-top:1px solid #efe3cd;background:#fff}.lf.on{display:flex}.lf input,.lf textarea{border:1px solid #e6d8bf;border-radius:12px;padding:10px;font-size:16px;background:#fffdf9}.lf label{font-size:12px;display:flex;gap:6px;align-items:flex-start;color:#6b5d48}.lf .sb{border:0;background:' + c + ';color:#fff;border-radius:99px;padding:11px;font-size:14px;font-weight:600;cursor:pointer}' +
       // κινητό: πλήρης οθόνη
       '@media (max-width:520px){.p{position:fixed;inset:0;width:100vw;height:100dvh;max-height:none;border-radius:0;bottom:0;border:0}.p.on~.b,.p.on~.tz{display:none}}' +
@@ -114,7 +114,7 @@ export const WIDGET_JS = String.raw`(() => {
         el('button', { class: 'x', type: 'button', 'aria-label': L.close, onclick: close }, '×')),
       msgs, chips, el('button', { class: 'lv', type: 'button', onclick: () => lf.classList.toggle('on') }, L.leave), lf,
       el('form', { class: 'f', onsubmit: (e) => { e.preventDefault(); send(); } }, inp, sendBtn),
-      el('div', { class: 'ft' }, cfg.privacy ? el('a', { href: cfg.privacy, target: '_blank', rel: 'noopener' }, en ? 'Privacy' : 'Απόρρητο') : el('span'), el('span', null, cfg.subtitle ? L.ai : ''), cfg.powered ? el('a', { href: cfg.powered.url, target: '_blank', rel: 'noopener' }, 'Powered by ' + cfg.powered.name) : null));
+      el('div', { class: 'ft' }, el('span', null, cfg.privacy ? el('a', { href: cfg.privacy, target: '_blank', rel: 'noopener' }, en ? 'Privacy' : 'Απόρρητο') : null, cfg.privacy && cfg.subtitle ? ' · ' : '', cfg.subtitle ? L.ai : ''), cfg.powered ? el('a', { class: 'pw', href: cfg.powered.url, target: '_blank', rel: 'noopener' }, 'Powered by ' + cfg.powered.name) : null));
     let tz = null;
     const hideTz = () => { if (tz) { tz.remove(); tz = null; } ss.set('ic_tz_' + KEY, '1'); };
     const toggle = () => { hideTz(); panel.classList.toggle('on'); if (panel.classList.contains('on')) { inp.focus(); scroll(); } };

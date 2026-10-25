@@ -167,12 +167,12 @@ export function turnText(t: any, x: { q: string; reply: string; country?: string
 // Βοήθεια εγκατάστασης: ποιες ομάδες/κανάλια έχουν μιλήσει πρόσφατα στο bot (για το chat id).
 export async function tgChats(env: ShopEnv) {
   if (!env.TG_BOT_TOKEN) return { error: 'no_bot_token' };
-  const r = await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/getUpdates?allowed_updates=${encodeURIComponent('["message","my_chat_member","channel_post"]')}`, { signal: AbortSignal.timeout(8000) });
+  const r = await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/getUpdates?allowed_updates=${encodeURIComponent('[]')}`, { signal: AbortSignal.timeout(8000) });
   const j: any = await r.json().catch(() => ({}));
   const seen = new Map<string, any>();
-  for (const u of j.result || []) { const c = u.message?.chat || u.my_chat_member?.chat || u.channel_post?.chat; if (c?.id) seen.set(String(c.id), { id: String(c.id), type: c.type, title: c.title || [c.first_name, c.last_name].filter(Boolean).join(' ') }); }
+  for (const u of j.result || []) { const c = u.message?.chat || u.my_chat_member?.chat || u.chat_member?.chat || u.channel_post?.chat || u.edited_message?.chat; if (c?.id) seen.set(String(c.id), { id: String(c.id), type: c.type, title: c.title || [c.first_name, c.last_name].filter(Boolean).join(' ') }); }
   let bot: any = null; let hook: any = null;
   try { const m: any = await (await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/getMe`, { signal: AbortSignal.timeout(8000) })).json(); bot = m.ok ? { username: m.result?.username, name: m.result?.first_name } : { error: m.description || 'getMe_failed' }; } catch { bot = { error: 'getMe_unreachable' }; }
   try { const w: any = await (await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/getWebhookInfo`, { signal: AbortSignal.timeout(8000) })).json(); hook = { webhook_set: !!w.result?.url, pending: w.result?.pending_update_count ?? null }; } catch { hook = null; }
-  return { chats: [...seen.values()], updates_ok: j.ok === true, telegram_error: j.ok === false ? String(j.description || '').slice(0, 120) : null, bot, ...(hook || {}) };
+  return { chats: [...seen.values()], updates: (j.result || []).length, kinds: [...new Set((j.result || []).map((u: any) => Object.keys(u).filter((k) => k !== 'update_id')[0]))], updates_ok: j.ok === true, telegram_error: j.ok === false ? String(j.description || '').slice(0, 120) : null, bot, ...(hook || {}) };
 }

@@ -4,7 +4,7 @@ import { clean, json, nowIso, day, sha256Hex, parseList, parseObj, findContact }
 import { filterLinks } from './text.ts';
 import { notifyLead } from './notify.ts';
 import { answer, pickProvider } from './llm.ts';
-import { productInfo, productCards, detectOrder, ordersEnabled, lookupOrder, orderBlock, tgSend, turnText } from './shop.ts';
+import { productInfo, productCards, stripCardLinks, detectOrder, ordersEnabled, lookupOrder, orderBlock, tgSend, turnText } from './shop.ts';
 
 const MAX_MSGS = 12, MAX_MSG_LEN = 1000, MAX_BODY = 20000;
 export const LIMITS = { perIpHour: 25, perIpDay: 80, leadsPerIpHour: 3, ordersPerIpHour: 6 };
@@ -110,7 +110,8 @@ export async function handleChat(req: Request, env: Env, t: any, headers: Record
   // κάθε απάντηση στο κοινό κανάλι Telegram του πελάτη (αν έχει ρυθμιστεί)
   const tg = tgSend(env as any, t, turnText(t, { q, reply, country: String(cf.country || ''), path: clean(b.path, 200), sid, order: !!det.number, lead: leadSaved })).catch(() => false);
   if (ctx) ctx.waitUntil(tg); else await tg;
-  return json({ reply, lead: leadSaved, products: productCards(prod.rows, reply) }, 200, headers);
+  const cards = productCards(prod.rows, reply);
+  return json({ reply: cards.length ? stripCardLinks(reply, cards) : reply, lead: leadSaved, products: cards }, 200, headers);
 }
 
 // Φόρμα «Αφήστε τα στοιχεία σας» του widget (με ρητή συγκατάθεση).

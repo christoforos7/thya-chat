@@ -213,3 +213,17 @@ export async function tgChats(env: ShopEnv) {
   try { const w: any = await (await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/getWebhookInfo`, { signal: AbortSignal.timeout(8000) })).json(); hook = { webhook_set: !!w.result?.url, pending: w.result?.pending_update_count ?? null }; } catch { hook = null; }
   return { chats: [...seen.values()], updates: (j.result || []).length, kinds: [...new Set((j.result || []).map((u: any) => Object.keys(u).filter((k) => k !== 'update_id')[0]))], updates_ok: j.ok === true, telegram_error: j.ok === false ? String(j.description || '').slice(0, 120) : null, bot, ...(hook || {}) };
 }
+
+// Όταν το widget δείχνει κάρτες, οι σύνδεσμοι των ίδιων προϊόντων στο κείμενο περισσεύουν: [όνομα](url) → όνομα, γυμνό url → αφαιρείται.
+export function stripCardLinks(reply: string, cards: { url: string }[]) {
+  let out = reply;
+  for (const c of cards) {
+    const us = [c.url]; try { const d = decodeURI(c.url); if (d !== c.url) us.push(d); } catch { /* */ }
+    for (const u of us) {
+      const e = u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      out = out.replace(new RegExp('\\[([^\\]\\n]{1,120})\\]\\(' + e + '\\)', 'g'), '$1');
+      out = out.replace(new RegExp('[ \\t]*[(\\-–:]?[ \\t]*' + e + '[ \\t]*\\)?', 'g'), '');
+    }
+  }
+  return out.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}

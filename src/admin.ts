@@ -1,7 +1,7 @@
 // Διαχείριση: Authorization: Bearer <ADMIN_TOKEN>. Προτείνεται επιπλέον Cloudflare Access στο /admin/*.
 //   GET  /admin/tenants                         λίστα πελατών + χρήση σήμερα
 //   POST /admin/tenants                         νέος/ενημέρωση {id, name, origins[], start_url, brand{}, instructions, facts, lead_webhook, daily_cap, max_pages, status}
-//   POST /admin/tenants/<id>/crawl              εκπαίδευση τώρα (από το site)
+//   POST /admin/tenants/<id>/crawl[?continue=1] εκπαίδευση τώρα (από το site· συνέχεια όσο remaining > 0)
 //   POST /admin/tenants/<id>/doc                πρόσθετο κείμενο γνώσης {title, text}
 //   GET  /admin/tenants/<id>/convos?days=7      συζητήσεις
 //   GET  /admin/tenants/<id>/leads?days=30      leads
@@ -11,7 +11,7 @@
 //   POST /admin/tenants/<id>/tg-test            δοκιμαστικό μήνυμα στο κοινό κανάλι Telegram
 //   GET  /admin/tg-chats                        ομάδες που είδε πρόσφατα το bot (για το tg_chat)
 //   Πεδία καταστήματος στο POST /admin/tenants: shop {type:'woocommerce', base:'https://...'}, tg_chat ('-100...')
-import { type Env, enqueueTenant, indexPage } from './kb.ts';
+import { type Env, enqueueTenant, indexPage, crawlStep } from './kb.ts';
 import { json, safeEqual, clean, nowIso, normOrigin, randomId, sha256Hex, parseList } from './util.ts';
 import { chunkText } from './text.ts';
 import { monthSpend } from './llm.ts';
@@ -101,7 +101,15 @@ export async function handleAdmin(req: Request, env: Env, path: string, publicUr
   switch (`${req.method} ${seg[3] || ''}`) {
     case 'POST shop-sync': { const r = await syncCatalog(env as any, t); await audit(env, 'shop-sync', id, JSON.stringify(r)); return json({ ...r, orders: ordersEnabled(env as any, t) }, r.ok ? 200 : 502); }
     case 'POST tg-test': return json({ ok: await tgSend(env as any, t, `✅ Ο AI βοηθός του ${t.name} είναι συνδεδεμένος με αυτό το κανάλι. Εδώ θα έρχονται οι συζητήσεις και τα αιτήματα.`) });
-    case 'POST crawl': { const n = await enqueueTenant(env, t); await audit(env, 'crawl', id, String(n)); return json({ ok: true, queued: n }); }
+    case 'POST crawl': {
+      // Χωρίς cron: ουρά + άμεση επεξεργασία μέχρι ~30 σελίδες ανά κλήση· ξανακαλέστε όσο remaining > 0.
+      const fresh = new URL(req.url).searchParams.get('continue') !== '1';
+      const n = fresh ? await enqueueTenant(env, t) : 0;
+      for (let i = 0; i < 5; i++) { const d = await crawlStep(env, 6).catch(() => 0); if (!d) break; }
+      const remaining = (await env.DB.prepare('SELECT COUNT(*) AS n FROM crawl_queue WHERE tenant = ?').bind(id).first())?.n || 0;
+      const pages = (await env.DB.prepare('SELECT COUNT(*) AS n FROM pages WHERE tenant = ?').bind(id).first())?.n || 0;
+      await audit(env, 'crawl', id, `${n}/${remaining}`); return json({ ok: true, queued: n, remaining, pages });
+    }
     case 'POST doc': {
       const b = await body(); const title = clean(b.title, 150) || 'Έγγραφο'; const text = clean(b.text, 100_000);
       if (text.length < 50) return json({ error: 'text_too_short' }, 400);

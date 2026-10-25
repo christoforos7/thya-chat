@@ -100,3 +100,12 @@ test('χωρίς κλειδιά παραγγελιών: παραπέμπει σ�
   assert.equal((env.DB.raw.prepare('SELECT COUNT(*) n FROM leads').get() as any).n >= 1, true);
   assert.ok(tg.some((m) => m.text.startsWith('⭐')));
 });
+
+test('συντήρηση χωρίς cron: το πολύ μία φορά ανά 10 λεπτά· ανανεώνει τον κατάλογο όταν παλιώσει', async () => {
+  const { maintenance } = await import('../src/index.ts');
+  await setup();
+  env.DB.raw.prepare("UPDATE tenants SET shop_synced = '2000-01-01T00:00:00Z'").run();
+  assert.equal(await maintenance(env), true);
+  assert.equal(await maintenance(env), false);
+  assert.notEqual((env.DB.raw.prepare('SELECT shop_synced s FROM tenants').get() as any).s, '2000-01-01T00:00:00Z');
+});

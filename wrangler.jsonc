@@ -22,7 +22,8 @@
   // Μέχρι τότε ο βοηθός ψάχνει με λέξεις (D1 FTS).
   // "vectorize": [ { "binding": "VEC", "index_name": "thya-chat-kb" } ],
 
-  "triggers": { "crons": ["*/10 * * * *"] },
+  // Χωρίς cron: ο δωρεάν λογαριασμός έχει όριο 5 cron (πιασμένα). Η συντήρηση τρέχει στο παρασκήνιο των συζητήσεων (src/index.ts).
+  "triggers": { "crons": [] },
 
   "vars": {
     "BRAND_NAME": "Thya",

@@ -12,13 +12,25 @@ export function pageTitle(html: string) {
 }
 
 // Κείμενο της σελίδας χωρίς scripts, styles, μενού και footer (εκεί είναι συνήθως επαναλαμβανόμενα πράγματα).
+// Cloudflare Email Obfuscation: data-cfemail="<hex>" → το πραγματικό email (1ο byte = κλειδί XOR).
+export function cfDecode(hex: string) {
+  if (!/^[0-9a-f]{4,400}$/i.test(hex) || hex.length % 2) return '';
+  const k = parseInt(hex.slice(0, 2), 16); let out = '';
+  for (let i = 2; i < hex.length; i += 2) out += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16) ^ k);
+  return /^[^\s@<>"']{1,64}@[^\s@<>"']{1,190}$/.test(out) ? out : '';
+}
+const cfEmails = (h: string) => h
+  .replace(/<a\b[^>]*data-cfemail="([0-9a-f]+)"[^>]*>[\s\S]*?<\/a>/gi, (_m, x) => ` ${cfDecode(x)} `)
+  .replace(/<span\b[^>]*data-cfemail="([0-9a-f]+)"[^>]*>[\s\S]*?<\/span>/gi, (_m, x) => ` ${cfDecode(x)} `)
+  .replace(/\/cdn-cgi\/l\/email-protection#([0-9a-f]+)/gi, (_m, x) => { const e = cfDecode(x); return e ? `mailto:${e}` : ''; });
+
 export function htmlToText(html: string) {
-  let s = html.replace(/<!--[\s\S]*?-->/g, ' ');
+  let s = cfEmails(html).replace(/<!--[\s\S]*?-->/g, ' ');
   for (const t of ['script', 'style', 'noscript', 'template', 'svg', 'iframe', 'nav', 'footer', 'form', 'select', 'head']) s = s.replace(new RegExp(`<${t}\\b[\\s\\S]*?<\\/${t}>`, 'gi'), ' ');
   const main = /<main\b[^>]*>([\s\S]*?)<\/main>/i.exec(s)?.[1];
   if (main && main.length > 400) s = main;
   s = s.replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr|\/section|\/article)\b[^>]*>/gi, '\n').replace(/<li\b[^>]*>/gi, '\n• ').replace(/<[^>]+>/g, ' ');
-  return decode(s).replace(/[ \t ]+/g, ' ').replace(/\s*\n\s*/g, '\n').replace(/\n{2,}/g, '\n').trim();
+  return decode(s).replace(/\[email[\s\u00a0]*protected\]/gi, '').replace(/[ \t ]+/g, ' ').replace(/\s*\n\s*/g, '\n').replace(/\n{2,}/g, '\n').trim();
 }
 
 // Σύνδεσμοι της ίδιας τοποθεσίας (χωρίς #, χωρίς αρχεία).

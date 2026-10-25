@@ -108,6 +108,8 @@ export async function handleChat(req: Request, env: Env, t: any, headers: Record
   // μόνο σύνδεσμοι προς τα domains του πελάτη
   const hosts = parseList(t.origins).map((o) => { try { return new URL(o).hostname; } catch { return ''; } }).filter(Boolean);
   reply = filterLinks(reply, hosts).slice(0, 2500);
+  // ποτέ το «[email protected]» του Cloudflare: παραπομπή στην επικοινωνία
+  reply = reply.replace(/\[email[\s\u00a0]*protected\]/gi, hosts[0] ? `τη φόρμα επικοινωνίας στο https://${hosts[0]}/contact/` : 'τη φόρμα επικοινωνίας');
 
   // ---- καταγραφή ----
   const neurons = kb.neurons + (ans.provider === 'workers-ai' ? tin * NEURONS.in / 1e6 + tout * NEURONS.out / 1e6 : 0);

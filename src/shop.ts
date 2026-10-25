@@ -1,0 +1,175 @@
+// Καταστήματα (WooCommerce): κατάλογος προϊόντων, κατάσταση παραγγελίας και ειδοποιήσεις σε ομάδα Telegram.
+// - Κατάλογος: από το ΔΗΜΟΣΙΟ Store API του καταστήματος (/wp-json/wc/store/v1/products), χωρίς κλειδιά, κάθε ώρα στη D1.
+// - Παραγγελίες: WooCommerce REST API με κλειδί ΜΟΝΟ ανάγνωσης (secrets WC_KEY_<ID>, WC_SECRET_<ID>).
+//   Απαντά μόνο αν ο αριθμός ΚΑΙ το email ταιριάζουν με την παραγγελία· αλλιώς «δεν βρέθηκε» (χωρίς διαρροή).
+//   Στον βοηθό φτάνουν μόνο κατάσταση, ημερομηνία, προϊόντα, τρόπος αποστολής και αριθμός αποστολής — ποτέ διεύθυνση/τηλέφωνο/πληρωμή.
+// - Telegram: ένα κοινό κανάλι/ομάδα ανά πελάτη (tenants.tg_chat) με το bot του Thya (secret TG_BOT_TOKEN).
+import type { Env } from './kb.ts';
+import { ftsQuery } from './kb.ts';
+import { clean, norm, nowIso, parseObj, EMAIL_RE } from './util.ts';
+import { htmlToText } from './text.ts';
+
+export type ShopEnv = Env & { TG_BOT_TOKEN?: string; [k: string]: any };
+
+export const SHOP_SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS shop_products (tenant TEXT NOT NULL, id INTEGER NOT NULL, name TEXT NOT NULL, url TEXT, price TEXT, sale INTEGER NOT NULL DEFAULT 0, in_stock INTEGER NOT NULL DEFAULT 1, cats TEXT, descr TEXT, updated TEXT NOT NULL, PRIMARY KEY (tenant, id))`,
+  `CREATE VIRTUAL TABLE IF NOT EXISTS shop_fts USING fts5(tenant UNINDEXED, pid UNINDEXED, body, tokenize = 'unicode61 remove_diacritics 2')`,
+];
+const ALTERS = ['ALTER TABLE tenants ADD COLUMN shop TEXT', 'ALTER TABLE tenants ADD COLUMN tg_chat TEXT', 'ALTER TABLE tenants ADD COLUMN shop_synced TEXT'];
+let ready = false;
+export async function ensureShop(env: Env) {
+  if (ready) return;
+  for (const q of SHOP_SCHEMA) await env.DB.prepare(q).run();
+  for (const q of ALTERS) await env.DB.prepare(q).run().catch(() => {});
+  ready = true;
+}
+
+export function shopCfg(t: any): { base: string } | null {
+  const s = parseObj(t?.shop);
+  if (s.type !== 'woocommerce' || typeof s.base !== 'string' || !/^https:\/\/[a-z0-9.-]+$/i.test(s.base)) return null;
+  return { base: s.base.replace(/\/+$/, '') };
+}
+const envKey = (t: any) => String(t.id).toUpperCase().replace(/[^A-Z0-9]/g, '_');
+
+// ---------------- κατάλογος ----------------
+export function money(minor: unknown, digits: unknown, sym = '€') {
+  const n = Number(minor); const d = Number.isFinite(+(digits as number)) ? +(digits as number) : 2;
+  if (!Number.isFinite(n)) return '';
+  return (n / 10 ** d).toLocaleString('el-GR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ' + sym;
+}
+export function productRow(p: any) {
+  const pr = p?.prices || {}; const d = pr.currency_minor_unit; const sym = pr.currency_symbol || '€';
+  let price = '';
+  if (pr.price_range && pr.price_range.min_amount != null && pr.price_range.min_amount !== pr.price_range.max_amount) price = `${money(pr.price_range.min_amount, d, sym)} – ${money(pr.price_range.max_amount, d, sym)}`;
+  else if (pr.price != null && pr.price !== '') price = money(pr.price, d, sym);
+  const sale = !!p.on_sale && pr.regular_price && pr.regular_price !== pr.price;
+  if (sale) price += ` (αντί ${money(pr.regular_price, d, sym)})`;
+  return {
+    id: +p.id, name: clean(htmlToText(String(p.name || '')), 160), url: /^https:\/\//.test(p.permalink || '') ? String(p.permalink) : null, price,
+    sale: sale ? 1 : 0, in_stock: p.is_in_stock === false ? 0 : 1,
+    cats: (Array.isArray(p.categories) ? p.categories : []).map((c: any) => clean(htmlToText(String(c?.name || '')), 60)).filter(Boolean).join(', '),
+    descr: clean(htmlToText(String(p.short_description || p.description || '')), 300),
+  };
+}
+
+export async function syncCatalog(env: ShopEnv, t: any, maxPages = 10) {
+  const cfg = shopCfg(t); if (!cfg) return { ok: false, error: 'no_shop' };
+  await ensureShop(env);
+  const rows: any[] = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const r = await fetch(`${cfg.base}/wp-json/wc/store/v1/products?per_page=100&page=${page}`, { headers: { accept: 'application/json', 'user-agent': 'Thya-Chat/1.0' }, signal: AbortSignal.timeout(15000) });
+    if (!r.ok) { if (page === 1) return { ok: false, error: `store_api_${r.status}` }; break; }
+    const list: any = await r.json().catch(() => null);
+    if (!Array.isArray(list) || !list.length) break;
+    for (const p of list) { const x = productRow(p); if (x.id && x.name) rows.push(x); }
+    if (list.length < 100) break;
+  }
+  if (!rows.length) return { ok: false, error: 'empty_catalog' };
+  const at = nowIso(); const db = env.DB;
+  const stmts = [db.prepare('DELETE FROM shop_products WHERE tenant = ?').bind(t.id), db.prepare('DELETE FROM shop_fts WHERE tenant = ?').bind(t.id)];
+  for (const x of rows) {
+    stmts.push(db.prepare('INSERT OR REPLACE INTO shop_products (tenant, id, name, url, price, sale, in_stock, cats, descr, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(t.id, x.id, x.name, x.url, x.price, x.sale, x.in_stock, x.cats, x.descr, at));
+    stmts.push(db.prepare('INSERT INTO shop_fts (tenant, pid, body) VALUES (?, ?, ?)').bind(t.id, x.id, norm(`${x.name}\n${x.cats}\n${x.descr}`)));
+  }
+  stmts.push(db.prepare('UPDATE tenants SET shop_synced = ? WHERE id = ?').bind(at, t.id));
+  if (db.batch) await db.batch(stmts); else for (const s of stmts) await s.run();
+  return { ok: true, products: rows.length };
+}
+
+const fmt = (x: any) => `- ${x.name} — ${x.price || 'τιμή στη σελίδα'}${x.sale ? ' · ΠΡΟΣΦΟΡΑ' : ''} · ${x.in_stock ? 'διαθέσιμο' : 'εξαντλημένο'}${x.cats ? ` · ${x.cats}` : ''}${x.url ? `\n  ${x.url}` : ''}${x.descr ? `\n  ${x.descr.slice(0, 160)}` : ''}`;
+
+// Τα πιο σχετικά προϊόντα για την ερώτηση + οι κατηγορίες, ως κείμενο για τον βοηθό.
+export async function productContext(env: ShopEnv, t: any, query: string, k = 8) {
+  if (!shopCfg(t)) return '';
+  await ensureShop(env);
+  const fq = ftsQuery(query);
+  let rows: any[] = [];
+  if (fq) {
+    try { rows = (await env.DB.prepare('SELECT p.* FROM shop_fts f JOIN shop_products p ON p.tenant = f.tenant AND p.id = f.pid WHERE shop_fts MATCH ? AND f.tenant = ? ORDER BY p.in_stock DESC, rank LIMIT ?').bind(fq, t.id, k).all()).results || []; } catch { rows = []; }
+  }
+  if (!rows.length && /προσφορ|εκπτωσ|sale|offer|δωρ|gift|νε[αο]|new/.test(norm(query))) {
+    rows = (await env.DB.prepare('SELECT * FROM shop_products WHERE tenant = ? AND in_stock = 1 ORDER BY sale DESC, updated DESC LIMIT ?').bind(t.id, k).all()).results || [];
+  }
+  const cats = (await env.DB.prepare('SELECT cats FROM shop_products WHERE tenant = ? AND cats IS NOT NULL').bind(t.id).all()).results || [];
+  const catSet = [...new Set(cats.flatMap((c: any) => String(c.cats).split(', ')).filter(Boolean))].slice(0, 30);
+  const n = (await env.DB.prepare('SELECT COUNT(*) AS n FROM shop_products WHERE tenant = ?').bind(t.id).first())?.n || 0;
+  if (!n) return '';
+  return [
+    `ΚΑΤΑΣΤΗΜΑ: ${n} προϊόντα. Κατηγορίες: ${catSet.join(', ') || '—'}.`,
+    rows.length ? `ΣΧΕΤΙΚΑ ΠΡΟΪΟΝΤΑ (τρέχουσες τιμές και διαθεσιμότητα· μετράνε ως ΠΗΓΕΣ):\n${rows.map(fmt).join('\n')}` : 'ΣΧΕΤΙΚΑ ΠΡΟΪΟΝΤΑ: κανένα δεν ταιριάζει ακριβώς — ρώτα τι ψάχνει (είδος, υλικό, χρώμα, για δώρο σε ποιον, προϋπολογισμό) ή πρότεινε κατηγορία.',
+    'ΠΡΟΤΑΣΕΙΣ ΠΡΟΪΟΝΤΩΝ: πρότεινε 1–3 προϊόντα από τα ΣΧΕΤΙΚΑ ΠΡΟΪΟΝΤΑ με τον σύνδεσμό τους, όνομα και τιμή όπως είναι γραμμένα. Μην προτείνεις εξαντλημένα, εκτός αν ρωτήσει για αυτά. Ποτέ προϊόν, τιμή ή έκπτωση που δεν υπάρχει εδώ.',
+  ].join('\n');
+}
+
+// ---------------- παραγγελίες ----------------
+const ORDER_RE = /(?:#\s?|(?:παραγγελ\p{L}*|order|αρ\.?|αριθμ\p{L}*|no\.?)\s*(?:αρ\.?|no\.?|#|:)?\s*)(\d{2,9})\b/iu;
+export function detectOrder(texts: string[]) {
+  const s = texts.join('\n');
+  const asks = /παραγγελ|order|αποστολ|δεμα|courier|tracking|voucher|πότε (θα )?(έρθει|φτάσει)|ποτε (θα )?(ερθει|φτασει)|που ειναι|πού είναι/i.test(s) || /παραγγελ|αποστολ|δεμα/.test(norm(s));
+  const num = (s.match(ORDER_RE) || [])[1] || '';
+  const email = ((s.match(EMAIL_RE) || [])[0] || '').toLowerCase();
+  return { asks: asks || !!num, number: num, email };
+}
+const STATUS: Record<string, string> = {
+  pending: 'Σε αναμονή πληρωμής', processing: 'Σε επεξεργασία (ετοιμάζεται)', 'on-hold': 'Σε αναμονή (θα επικοινωνήσουμε αν χρειαστεί)',
+  completed: 'Ολοκληρώθηκε / έχει αποσταλεί', cancelled: 'Ακυρώθηκε', refunded: 'Έγινε επιστροφή χρημάτων', failed: 'Η πληρωμή απέτυχε',
+  'checkout-draft': 'Δεν ολοκληρώθηκε', shipped: 'Απεστάλη', delivered: 'Παραδόθηκε',
+};
+export function ordersEnabled(env: ShopEnv, t: any) { const k = envKey(t); return !!(shopCfg(t) && env[`WC_KEY_${k}`] && env[`WC_SECRET_${k}`]); }
+
+export async function lookupOrder(env: ShopEnv, t: any, number: string, email: string): Promise<{ found: boolean; text: string }> {
+  const cfg = shopCfg(t); const k = envKey(t);
+  const key = env[`WC_KEY_${k}`], sec = env[`WC_SECRET_${k}`];
+  if (!cfg || !key || !sec || !/^\d{2,9}$/.test(number) || !email) return { found: false, text: '' };
+  let o: any = null;
+  try {
+    const r = await fetch(`${cfg.base}/wp-json/wc/v3/orders/${number}`, { headers: { authorization: 'Basic ' + btoa(`${key}:${sec}`), accept: 'application/json', 'user-agent': 'Thya-Chat/1.0' }, signal: AbortSignal.timeout(12000) });
+    if (r.ok) o = await r.json();
+  } catch { o = null; }
+  if (!o || String(o?.billing?.email || '').trim().toLowerCase() !== email.trim().toLowerCase()) return { found: false, text: '' };
+  const d = o.date_created ? new Date(o.date_created + (/Z|[+-]\d\d:?\d\d$/.test(o.date_created) ? '' : 'Z')) : null;
+  const date = d && !isNaN(+d) ? d.toLocaleDateString('el-GR', { timeZone: 'Europe/Athens' }) : '';
+  const items = (Array.isArray(o.line_items) ? o.line_items : []).slice(0, 8).map((x: any) => `${clean(x.name, 80)} ×${+x.quantity || 1}`).join(', ');
+  const ship = (Array.isArray(o.shipping_lines) ? o.shipping_lines : []).map((x: any) => clean(x.method_title, 60)).filter(Boolean).join(', ');
+  const track: string[] = [];
+  for (const m of Array.isArray(o.meta_data) ? o.meta_data : []) {
+    if (!/track|voucher|courier|acs|elta|geniki|speedex|boxnow|box_now/i.test(String(m?.key || ''))) continue;
+    const v = m.value;
+    if (typeof v === 'string' && v.length <= 80 && /[A-Za-z0-9]/.test(v)) track.push(clean(v, 80));
+    else if (Array.isArray(v)) for (const x of v) { const n = x?.tracking_number || x?.voucher; if (n) track.push(`${clean(x.tracking_provider || x.custom_tracking_provider || '', 40)} ${clean(n, 60)}`.trim()); }
+  }
+  const text = [`ΠΑΡΑΓΓΕΛΙΑ #${number} (επιβεβαιωμένη με το email του πελάτη):`, `Κατάσταση: ${STATUS[o.status] || clean(o.status, 40)}`, date && `Ημερομηνία: ${date}`, items && `Προϊόντα: ${items}`, ship && `Αποστολή: ${ship}`, track.length ? `Αριθμός αποστολής: ${[...new Set(track)].slice(0, 3).join(' · ')}` : ''].filter(Boolean).join('\n');
+  return { found: true, text };
+}
+
+export function orderBlock(enabled: boolean, res: { found: boolean; text: string } | null, det: { asks: boolean; number: string; email: string }) {
+  if (!det.asks) return '';
+  if (!enabled) return 'ΠΑΡΑΓΓΕΛΙΕΣ: δεν έχεις πρόσβαση σε παραγγελίες. Για κατάσταση παραγγελίας ζήτα να αφήσει όνομα, αριθμό παραγγελίας και τηλέφωνο ή email, και πες ότι το κατάστημα θα επικοινωνήσει.';
+  if (res?.found) return `${res.text}\nΔώσε αυτά τα στοιχεία σύντομα και φιλικά. Μην υποσχεθείς ημερομηνία παράδοσης που δεν γράφεται εδώ.`;
+  if (det.number && det.email) return 'ΠΑΡΑΓΓΕΛΙΕΣ: ο συνδυασμός αριθμού παραγγελίας και email δεν βρέθηκε. Ζήτα να ελέγξει τον αριθμό και το email που έδωσε στην παραγγελία, ή να αφήσει τα στοιχεία του για να τον βοηθήσει το κατάστημα. Μην πεις αν υπάρχει παραγγελία με αυτόν τον αριθμό.';
+  return 'ΠΑΡΑΓΓΕΛΙΕΣ: για να δεις την κατάσταση χρειάζεσαι ΚΑΙ τον αριθμό παραγγελίας ΚΑΙ το email που δόθηκε στην παραγγελία. Ζήτα ό,τι λείπει (ο αριθμός υπάρχει στο email επιβεβαίωσης).';
+}
+
+// ---------------- Telegram ----------------
+const tgOk = (t: any) => /^-?\d{5,20}$/.test(String(t?.tg_chat || ''));
+export async function tgSend(env: ShopEnv, t: any, text: string) {
+  if (!env.TG_BOT_TOKEN || !tgOk(t)) return false;
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: String(t.tg_chat), text: text.slice(0, 3900), disable_web_page_preview: true }), signal: AbortSignal.timeout(8000) });
+    return r.ok;
+  } catch { return false; }
+}
+export function turnText(t: any, x: { q: string; reply: string; country?: string; path?: string; sid: string; order?: boolean; lead?: boolean }) {
+  const host = (() => { try { return new URL(JSON.parse(t.origins)[0]).hostname; } catch { return t.name; } })();
+  const head = `💬 ${host}${x.path ? ` · ${x.path.slice(0, 60)}` : ''}${x.country ? ` · ${x.country}` : ''} · #${x.sid.slice(0, 6)}${x.order ? ' · 📦 παραγγελία' : ''}${x.lead ? ' · ⭐ στοιχεία' : ''}`;
+  return `${head}\n👤 ${x.q.slice(0, 1200)}\n🤖 ${x.reply.slice(0, 1800)}`;
+}
+// Βοήθεια εγκατάστασης: ποιες ομάδες/κανάλια έχουν μιλήσει πρόσφατα στο bot (για το chat id).
+export async function tgChats(env: ShopEnv) {
+  if (!env.TG_BOT_TOKEN) return { error: 'no_bot_token' };
+  const r = await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/getUpdates?allowed_updates=${encodeURIComponent('["message","my_chat_member","channel_post"]')}`, { signal: AbortSignal.timeout(8000) });
+  const j: any = await r.json().catch(() => ({}));
+  const seen = new Map<string, any>();
+  for (const u of j.result || []) { const c = u.message?.chat || u.my_chat_member?.chat || u.channel_post?.chat; if (c?.id) seen.set(String(c.id), { id: String(c.id), type: c.type, title: c.title || [c.first_name, c.last_name].filter(Boolean).join(' ') }); }
+  return { chats: [...seen.values()] };
+}

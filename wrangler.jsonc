@@ -1,0 +1,37 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Thya Chat — AI βοηθός του thya.gr. Αυτόνομο project: δικός του Worker, δική του βάση, δικό του bot Telegram.
+  "name": "thya-chat",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+
+  // Δημόσια διεύθυνση: custom domain από το dashboard (Worker → Settings → Domains & Routes), chat.thya.gr.
+  // Κλειστά τα *.workers.dev και τα preview URLs.
+  "workers_dev": false,
+  "preview_urls": false,
+
+  "d1_databases": [
+    { "binding": "DB", "database_name": "thya-chat", "database_id": "6b10b95a-694f-4473-bdab-3d69b46c8a30" }
+  ],
+
+  // Workers AI: απαντήσεις (gemma-4-26b) και embeddings (bge-m3). Δωρεάν 10.000 neurons/ημέρα — ο Worker σταματά μόνος του στο NEURON_CAP.
+  "ai": { "binding": "AI" },
+
+  // Vectorize (σημασιολογική αναζήτηση). Ενεργοποίηση ΑΦΟΥ δημιουργηθεί το index:
+  //   Dashboard → AI → Vectorize → Create index: name thya-chat-kb, dimensions 1024, metric cosine.
+  // Μέχρι τότε ο βοηθός ψάχνει με λέξεις (D1 FTS).
+  // "vectorize": [ { "binding": "VEC", "index_name": "thya-chat-kb" } ],
+
+  "triggers": { "crons": ["*/10 * * * *"] },
+
+  "vars": {
+    "BRAND_NAME": "Thya",
+    "BRAND_URL": "https://www.thya.gr",
+    "NEURON_CAP": "9000"
+  },
+  // Secrets (dashboard → Settings → Variables and Secrets): ADMIN_TOKEN (≥ 24 χαρακτήρες), IP_SALT, ANTHROPIC_API_KEY (απαντήσεις πελατών που πληρώνουν),
+  // προαιρετικά NOTIFY_WEBHOOK, TG_BOT_TOKEN (κοινά κανάλια Telegram) και για καταστήματα WC_KEY_<ID> / WC_SECRET_<ID> (WooCommerce, μόνο ανάγνωση). Μηνιαίο όριο δαπάνης Anthropic: CLAUDE_MONTHLY_USD (προεπιλογή 30) — πάνω από αυτό απαντά το δωρεάν μοντέλο.
+  "keep_vars": true,
+
+  "observability": { "enabled": true }
+}

@@ -36,7 +36,7 @@ const sysOf = (i = -1) => aiCalls.at(i).input.messages[0].content as string;
 async function setup(orders = true) {
   const r: any = await (await admin('/admin/tenants', { id: 'shop', name: 'Shop', origins: [BASE] })).json();
   const u = await admin('/admin/tenants', { id: 'shop', shop: { type: 'woocommerce', base: BASE }, tg_chat: '-1001234567' }); assert.equal(u.status, 200);
-  const s: any = await (await admin('/admin/tenants/shop/shop-sync', {})).json(); assert.equal(s.ok, true); assert.equal(s.products, 3); assert.equal(s.orders, orders);
+  const s: any = await (await admin('/admin/tenants/shop/shop-sync', {})).json(); assert.equal(s.ok, true); assert.equal(s.products, CATALOG.length); assert.equal(s.orders, orders);
   return r.tenant.site_key as string;
 }
 
@@ -108,4 +108,14 @@ test('συντήρηση χωρίς cron: το πολύ μία φορά ανά 1
   assert.equal(await maintenance(env), true);
   assert.equal(await maintenance(env), false);
   assert.notEqual((env.DB.raw.prepare('SELECT shop_synced s FROM tenants').get() as any).s, '2000-01-01T00:00:00Z');
+});
+
+test('προσφορές χωρίς εκπτώσεις: σίγουρη απάντηση του καταστήματος, νέες αφίξεις, χωρίς «δεν έχω στοιχεία»', async () => {
+  CATALOG.splice(0, CATALOG.length, P(1, 'Aira Silver ασημένιο δαχτυλίδι', '2100', { cat: 'Νέες Αφίξεις' }), P(3, 'Luna χρυσό κολιέ', '4900', { cat: 'Κολιέ' }));
+  const key = await setup();
+  await chat(key, ['Έχετε προσφορές;']);
+  const sys = sysOf();
+  assert.match(sys, /ΑΥΤΗ ΤΗ ΣΤΙΓΜΗ δεν τρέχει έκπτωση/);
+  assert.match(sys, /ΝΕΕΣ ΑΦΙΞΕΙΣ[\s\S]*Aira Silver/);
+  assert.match(sys, /ΑΠΑΓΟΡΕΥΕΤΑΙ στις προσφορές/);
 });

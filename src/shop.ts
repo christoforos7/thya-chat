@@ -79,23 +79,46 @@ export async function syncCatalog(env: ShopEnv, t: any, maxPages = 10) {
 const fmt = (x: any) => `- ${x.name} — ${x.price || 'τιμή στη σελίδα'}${x.sale ? ' · ΠΡΟΣΦΟΡΑ' : ''} · ${x.in_stock ? 'διαθέσιμο' : 'εξαντλημένο'}${x.cats ? ` · ${x.cats}` : ''}${x.url ? `\n  ${x.url}` : ''}${x.descr ? `\n  ${x.descr.slice(0, 160)}` : ''}`;
 
 // Τα πιο σχετικά προϊόντα για την ερώτηση + οι κατηγορίες, ως κείμενο για τον βοηθό.
+// Πρόθεση «προσφορές/εκπτώσεις»: απάντηση από την τρέχουσα κατάσταση του καταλόγου, όχι από αναζήτηση λέξεων.
+export const OFFER_RE = /προσφορ|εκπτωσ|εκπτωτ|κουπον|κωδικ\p{L}* εκπτ|sale|offer|discount|coupon|black ?friday|μειωμεν/u;
+const NEW_CAT_RE = /νεες αφιξεισ|new in|νεα/;
+
+// Τα πιο σχετικά προϊόντα για την ερώτηση + οι κατηγορίες, ως κείμενο για τον βοηθό.
 export async function productContext(env: ShopEnv, t: any, query: string, k = 8) {
   if (!shopCfg(t)) return '';
   await ensureShop(env);
+  const n = (await env.DB.prepare('SELECT COUNT(*) AS n FROM shop_products WHERE tenant = ?').bind(t.id).first())?.n || 0;
+  if (!n) return '';
+  const cats = (await env.DB.prepare('SELECT cats FROM shop_products WHERE tenant = ? AND cats IS NOT NULL').bind(t.id).all()).results || [];
+  const catSet = [...new Set(cats.flatMap((c: any) => String(c.cats).split(', ')).filter(Boolean))].slice(0, 30);
+  const head = `ΚΑΤΑΣΤΗΜΑ: ${n} προϊόντα. Κατηγορίες: ${catSet.join(', ') || '—'}.`;
+  const q = norm(query);
+
+  if (OFFER_RE.test(q)) {
+    const sale: any[] = (await env.DB.prepare('SELECT * FROM shop_products WHERE tenant = ? AND sale = 1 AND in_stock = 1 ORDER BY updated DESC LIMIT ?').bind(t.id, k).all()).results || [];
+    if (sale.length) {
+      return [head, `ΠΡΟΪΟΝΤΑ ΣΕ ΠΡΟΣΦΟΡΑ ΤΩΡΑ (μετράνε ως ΠΗΓΕΣ):\n${sale.map(fmt).join('\n')}`,
+        'ΠΡΟΣΦΟΡΕΣ: παρουσίασε με ενθουσιασμό 2–3 από αυτά με την τιμή προσφοράς, την αρχική τιμή και τον σύνδεσμο. Ρώτα αν ψάχνει κάτι συγκεκριμένο ή για δώρο.'].join('\n');
+    }
+    const all: any[] = (await env.DB.prepare('SELECT * FROM shop_products WHERE tenant = ? AND in_stock = 1 ORDER BY updated DESC').bind(t.id).all()).results || [];
+    const fresh = all.filter((x) => NEW_CAT_RE.test(norm(x.cats || ''))).slice(0, 4);
+    const pick = (fresh.length ? fresh : all.slice(0, 4));
+    return [head, `ΝΕΕΣ ΑΦΙΞΕΙΣ / ΠΡΟΤΑΣΕΙΣ (μετράνε ως ΠΗΓΕΣ):\n${pick.map(fmt).join('\n')}`,
+      'ΠΡΟΣΦΟΡΕΣ — ΑΥΤΗ ΤΗ ΣΤΙΓΜΗ δεν τρέχει έκπτωση σε προϊόντα. Απάντησε σαν το ίδιο το κατάστημα (α΄ πληθυντικός: «αυτή τη στιγμή δεν έχουμε…»), ζεστά και με σιγουριά, σε 2–4 σύντομες προτάσεις:',
+      '1) πες απλά ότι αυτή την περίοδο δεν τρέχει κάποια έκπτωση· 2) θύμισε τα σταθερά πλεονεκτήματα (π.χ. δωρεάν αποστολή, Gift Card αν υπάρχει στις κατηγορίες)· 3) πρότεινε 1–2 από τις ΝΕΕΣ ΑΦΙΞΕΙΣ με τιμή και σύνδεσμο· 4) πρότεινε να αφήσει το email του για να ενημερωθεί πρώτος/πρώτη για την επόμενη προσφορά.',
+      'ΑΠΑΓΟΡΕΥΕΤΑΙ στις προσφορές: «δεν έχω στοιχεία», «δεν γνωρίζω», «δεν θέλω να σας δώσω λάθος πληροφορία», παραπομπή σε τηλέφωνο για προσφορές, ή επινόηση έκπτωσης/κουπονιού.'].join('\n');
+  }
+
   const fq = ftsQuery(query);
   let rows: any[] = [];
   if (fq) {
     try { rows = (await env.DB.prepare('SELECT p.* FROM shop_fts f JOIN shop_products p ON p.tenant = f.tenant AND p.id = f.pid WHERE shop_fts MATCH ? AND f.tenant = ? ORDER BY p.in_stock DESC, rank LIMIT ?').bind(fq, t.id, k).all()).results || []; } catch { rows = []; }
   }
-  if (!rows.length && /προσφορ|εκπτωσ|sale|offer|δωρ|gift|νε[αο]|new/.test(norm(query))) {
+  if (!rows.length && /δωρ|gift|νε[αο]|new/.test(q)) {
     rows = (await env.DB.prepare('SELECT * FROM shop_products WHERE tenant = ? AND in_stock = 1 ORDER BY sale DESC, updated DESC LIMIT ?').bind(t.id, k).all()).results || [];
   }
-  const cats = (await env.DB.prepare('SELECT cats FROM shop_products WHERE tenant = ? AND cats IS NOT NULL').bind(t.id).all()).results || [];
-  const catSet = [...new Set(cats.flatMap((c: any) => String(c.cats).split(', ')).filter(Boolean))].slice(0, 30);
-  const n = (await env.DB.prepare('SELECT COUNT(*) AS n FROM shop_products WHERE tenant = ?').bind(t.id).first())?.n || 0;
-  if (!n) return '';
   return [
-    `ΚΑΤΑΣΤΗΜΑ: ${n} προϊόντα. Κατηγορίες: ${catSet.join(', ') || '—'}.`,
+    head,
     rows.length ? `ΣΧΕΤΙΚΑ ΠΡΟΪΟΝΤΑ (τρέχουσες τιμές και διαθεσιμότητα· μετράνε ως ΠΗΓΕΣ):\n${rows.map(fmt).join('\n')}` : 'ΣΧΕΤΙΚΑ ΠΡΟΪΟΝΤΑ: κανένα δεν ταιριάζει ακριβώς — ρώτα τι ψάχνει (είδος, υλικό, χρώμα, για δώρο σε ποιον, προϋπολογισμό) ή πρότεινε κατηγορία.',
     'ΠΡΟΤΑΣΕΙΣ ΠΡΟΪΟΝΤΩΝ: πρότεινε 1–3 προϊόντα από τα ΣΧΕΤΙΚΑ ΠΡΟΪΟΝΤΑ με τον σύνδεσμό τους, όνομα και τιμή όπως είναι γραμμένα. Μην προτείνεις εξαντλημένα, εκτός αν ρωτήσει για αυτά. Ποτέ προϊόν, τιμή ή έκπτωση που δεν υπάρχει εδώ.',
   ].join('\n');

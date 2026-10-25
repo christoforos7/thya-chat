@@ -16,7 +16,10 @@ export const WIDGET_JS = String.raw`(() => {
   let hist = []; try { hist = JSON.parse(ss.get('ic_hist_' + KEY) || '[]'); } catch (e) {}
   const el = (t, a, ...k) => { const e = document.createElement(t); if (a) for (const [x, v] of Object.entries(a)) { if (x === 'class') e.className = v; else if (x.startsWith('on')) e.addEventListener(x.slice(2), v); else e.setAttribute(x, v); } for (const c of k.flat()) if (c != null) e.append(c); return e; };
   // κείμενο με ασφαλείς συνδέσμους (μόνο https), χωρίς HTML
-  const rich = (s) => { const f = document.createDocumentFragment(); const re = /https:\/\/[^\s)<>"']+/g; let i = 0, m; while ((m = re.exec(s))) { f.append(s.slice(i, m.index)); const u = m[0].replace(/[.,;:!?]+$/, ''); f.append(el('a', { href: u, target: '_blank', rel: 'noopener noreferrer nofollow' }, u)); i = m.index + u.length; } f.append(s.slice(i)); return f; };
+  const nice = (u) => { try { const x = new URL(u); const p = decodeURIComponent(x.pathname).replace(/\/$/, ''); return x.hostname.replace(/^www\./, '') + (p.length > 32 ? p.slice(0, 30) + '…' : p); } catch (e) { return u; } };
+  const link = (u, label) => el('a', { href: u, target: '_blank', rel: 'noopener noreferrer nofollow' }, label || nice(u));
+  // κείμενο → **έντονα**, [κείμενο](https://…) και γυμνοί σύνδεσμοι https· χωρίς HTML
+  const rich = (s) => { const f = document.createDocumentFragment(); const re = /\*\*([^*\n]{1,200})\*\*|\[([^\]\n]{1,120})\]\((https:\/\/[^\s)<>"']+)\)|(https:\/\/[^\s)<>"']+)/g; let i = 0, m; while ((m = re.exec(s))) { f.append(s.slice(i, m.index)); if (m[1]) f.append(el('strong', null, m[1])); else if (m[2]) f.append(link(m[3], m[2])); else { const u = m[4].replace(/[.,;:!?]+$/, ''); f.append(link(u)); re.lastIndex = m.index + u.length; } i = re.lastIndex; } f.append(s.slice(i)); return f; };
 
   fetch(API + '/config').then((r) => r.ok ? r.json() : null).then((cfg) => { if (cfg && cfg.ok) mount(cfg); }).catch(() => {});
 

@@ -38,7 +38,7 @@ async function claude(env: Env, t: any, sys: string, msgs: { role: string; conte
     body: JSON.stringify({ model: env.CLAUDE_MODEL || m.id, max_tokens: 450, temperature: 0.3, system: sys, messages: msgs }),
     signal: AbortSignal.timeout(20000),
   });
-  if (!r.ok) throw new Error(`claude_${r.status}`);
+  if (!r.ok) { const t = await r.text().catch(() => ''); let m = ''; try { m = JSON.parse(t)?.error?.message || ''; } catch { m = t; } throw new Error(`claude_${r.status} ${String(m).slice(0, 90)}`); }
   const j: any = await r.json();
   const text = (Array.isArray(j.content) ? j.content : []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
   const tin = +j?.usage?.input_tokens || 0, tout = +j?.usage?.output_tokens || 0;
@@ -48,6 +48,7 @@ async function claude(env: Env, t: any, sys: string, msgs: { role: string; conte
 async function workersAi(env: Env, sys: string, msgs: { role: string; content: string }[]): Promise<Answer> {
   const r = await env.AI.run(WAI_MODEL(env), { messages: [{ role: 'system', content: sys }, ...msgs], max_tokens: 450, temperature: 0.3 });
   const { text, tin, tout } = aiText(r);
+  if (!text) throw new Error(`wai_empty ${JSON.stringify(r).slice(0, 80)}`);
   return { text, tin, tout, provider: 'workers-ai', model: WAI_MODEL(env), costUsd: 0 };
 }
 
@@ -59,7 +60,7 @@ export async function answer(env: Env, t: any, sys: string, msgs: { role: string
     if (a.text) return a;
     throw new Error('empty');
   } catch (e: any) {
-    const err = String(e?.message || e).slice(0, 120);
+    const err = String(e?.message || e).slice(0, 160);
     try {
       const b = first === 'claude' ? await workersAi(env, sys, msgs) : env.ANTHROPIC_API_KEY && t.plan !== 'trial' ? await claude(env, t, sys, msgs) : null;
       if (b) return { ...b, err };

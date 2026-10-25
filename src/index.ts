@@ -9,7 +9,6 @@ import { type Env, crawlStep, enqueueTenant } from './kb.ts';
 import { handleChat, handleLead } from './chat.ts';
 import { handleAdmin } from './admin.ts';
 import { WIDGET_JS } from './widget.ts';
-import { WIDGET_JS_LIVE } from './widget-live.ts';
 import { asset } from './assets.ts';
 import { ensureShop, syncCatalog } from './shop.ts';
 import { json, cors, originAllowed, parseList, parseObj, SEC_HEADERS, nowIso } from './util.ts';
@@ -57,9 +56,9 @@ export default {
   async fetch(req: Request, env: Env, ctx: { waitUntil: (p: Promise<unknown>) => void }): Promise<Response> {
     const url = new URL(req.url); const p = url.pathname;
     const publicUrl = env.PUBLIC_URL || url.origin;
-    // /w.js = έκδοση που βλέπουν οι επισκέπτες· /w-next.js = νέα έκδοση για προεπισκόπηση πριν την έγκριση
+    // /w.js = έκδοση των επισκεπτών· /w-next.js = ίδια (χρησιμοποιείται για προεπισκόπηση πριν από αλλαγές)
     if ((p === '/w.js' || p === '/w-next.js') && req.method === 'GET') {
-      return new Response(p === '/w-next.js' ? WIDGET_JS : WIDGET_JS_LIVE, { headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'public, max-age=3600', 'access-control-allow-origin': '*', ...SEC_HEADERS } });
+      return new Response(WIDGET_JS, { headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'public, max-age=3600', 'access-control-allow-origin': '*', ...SEC_HEADERS } });
     }
     if (p.startsWith('/a/') && req.method === 'GET') { const r = asset(p); if (r) return r; }
     if (p === '/' || p === '/health') return json({ ok: true, service: env.BRAND_NAME || 'Thya Chat' });
